@@ -11,7 +11,7 @@
 #include <apr_lib.h>
 #include "apr.h"
 #include "apr_optional.h"
-//#include "unixd.h"
+#include "unixd.h"
 
 #if APR_HAS_SHARED_MEMORY
 #include "apr_rmm.h"
@@ -272,8 +272,12 @@ void cache_free(ServerConfig *config, const void *ptr)
   }
 }
 
+char *fetch_key(ServerConfig *config, char *key) {
+ return (char *)apr_rmm_addr_get(config->cache_rmm, apr_rmm_offset_get(config->cache_rmm, key));
+}
+
 int check_node(ServerConfig *config, upload_progress_node_t *node, const char *key) {
-  char *node_key = (char *)apr_rmm_addr_get(config->cache_rmm, apr_rmm_offset_get(config->cache_rmm, node->key));
+  char *node_key = fetch_key(config, node->key);
   return strcasecmp(node_key, key) == 0 ? 1 : 0;
 }
 
@@ -438,6 +442,40 @@ int add_upload_to_track(request_rec* r, const char* key) {
   return OK;
 }
 
+void upload_progress_destroy_cache(ServerConfig *config) {
+    upload_progress_cache_t *cache = fetch_cache(config);
+    upload_progress_node_t *node, *temp;
+   
+    cache_free(config, cache);
+    node = fetch_node(config, cache->head);
+    while(node != NULL) {
+      temp = fetch_node(config, node->next);
+      
+      cache_free(config, node);
+      node = temp;
+    }
+}
+
+static apr_status_t upload_progress_cache_module_kill(void *data)
+{
+    ServerConfig *st = (ServerConfig*)data;
+
+    upload_progress_destroy_cache(st);
+
+#if APR_HAS_SHARED_MEMORY
+    if (st->cache_rmm != NULL) {
+        apr_rmm_destroy (st->cache_rmm);
+        st->cache_rmm = NULL;
+    }
+    if (st->cache_shm != NULL) {
+        apr_status_t result = apr_shm_destroy(st->cache_shm);
+        st->cache_shm = NULL;
+        return result;
+    }
+#endif
+    return APR_SUCCESS;
+}
+
 apr_status_t upload_progress_cache_init(apr_pool_t *pool, ServerConfig *config)
 {
 
@@ -468,6 +506,8 @@ apr_status_t upload_progress_cache_init(apr_pool_t *pool, ServerConfig *config)
     if (result != APR_SUCCESS) {
         return result;
     }
+
+    apr_pool_cleanup_register(config->pool, config , upload_progress_cache_module_kill, apr_pool_cleanup_null);
     
     /* init cache object */
     CACHE_LOCK();
@@ -533,7 +573,6 @@ int upload_progress_init(apr_pool_t *p, apr_pool_t *plog,
             return DONE;
         }
 
-
 #if APR_HAS_SHARED_MEMORY
         if (config->cache_file) {
             config->lock_file = apr_pstrcat(config->pool, config->cache_file, ".lck",
@@ -548,14 +587,14 @@ int upload_progress_init(apr_pool_t *p, apr_pool_t *plog,
             return result;
         }
 
-/*#ifdef AP_NEED_SET_MUTEX_PERMS
+#ifdef AP_NEED_SET_MUTEX_PERMS
         result = unixd_set_global_mutex_perms(config->cache_lock);
         if (result != APR_SUCCESS) {
             ap_log_error(APLOG_MARK, APLOG_CRIT, result, s,
                          "LDAP cache: failed to set mutex permissions");
             return result;
         }
-#endif*/
+#endif
         /* merge config in all vhost */
         s_vhost = s->next;
         while (s_vhost) {
