@@ -1,6 +1,6 @@
 Apache upload progress module. Works with mod_passenger (aka mod_rails).
 
-It's still in development.
+It has not been tested in production yet.
 TODO:
   - add more messages to logs for debugging
   - abbility to define shared cache size (currently size is 10kB)
@@ -8,13 +8,17 @@ TODO:
 To install and activate module:
 apxs2 -c -i -a mod_upload_progress.c
 
-Config:
+-c -> compile
+-i -> install (copy upload_progress_module.so to apache lib folder)
+-a -> activate (add LoadModule line to httpd.conf)
+
+Config for vhost:
 <Location />
     # enable tracking uploads in /
     TrackUploads On
 </Location>
 
 <Location /progress>
-    # enable upload progress reports for /progress dir
+    # enable upload progress reports in /progress
     ReportUploads On
 </Location>
