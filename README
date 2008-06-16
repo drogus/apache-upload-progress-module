@@ -4,10 +4,10 @@ apxs2 -c -i -a mod_upload_progress.c
 Config:
 <Location />
     # enable tracking uploads in /
-    TrackUploadProgress On
+    TrackUploads On
 </Location>
 
 <Location /progress>
     # enable upload progress reports for /progress dir
-    ReportUploadProgress On
+    ReportUploads On
 </Location>

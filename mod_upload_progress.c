@@ -107,9 +107,9 @@ typedef const char * (*CmdFunc)();// Workaround for some weird C++-specific comp
 
 static const command_rec upload_progress_cmds[] =
 {
-    AP_INIT_FLAG("TrackUploadProgress", (CmdFunc) track_upload_progress_cmd, NULL, OR_AUTHCFG,
+    AP_INIT_FLAG("TrackUploads", (CmdFunc) track_upload_progress_cmd, NULL, OR_AUTHCFG,
                  "Track upload progress in this location"),
-    AP_INIT_FLAG("ReportUploadProgress", (CmdFunc) report_upload_progress_cmd, NULL, OR_AUTHCFG,
+    AP_INIT_FLAG("ReportUploads", (CmdFunc) report_upload_progress_cmd, NULL, OR_AUTHCFG,
                  "Report upload progress in this location"),
     { NULL }
 };
