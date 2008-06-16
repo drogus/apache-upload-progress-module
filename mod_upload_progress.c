@@ -47,6 +47,7 @@ typedef struct upload_progress_node_s{
   int uploaded;
   int err_status;
   char *key;
+  time_t expires;
   struct upload_progress_node_s* next;
   struct upload_progress_node_s* prev;
 }upload_progress_node_t;
@@ -183,7 +184,6 @@ upload_progress_config_create_dir(apr_pool_t *p, char *dirspec) {
 
 void *upload_progress_config_create_server(apr_pool_t *p, server_rec *s) {
 	ServerConfig *config = (ServerConfig *)apr_pcalloc(p, sizeof(ServerConfig));
-        config->foo = 0;
         config->cache_file = apr_pstrdup(p, "/tmp/upload_progress_cache");
         config->cache_bytes = 10240;
         apr_pool_create(&config->pool, p);
@@ -274,7 +274,7 @@ void cache_free(ServerConfig *config, const void *ptr)
 
 int check_node(ServerConfig *config, upload_progress_node_t *node, const char *key) {
   char *node_key = (char *)apr_rmm_addr_get(config->cache_rmm, apr_rmm_offset_get(config->cache_rmm, node->key));
-  return strcmp(node_key, key) < 0 ? 0 : 1;
+  return strcasecmp(node_key, key) == 0 ? 1 : 0;
 }
 
 upload_progress_node_t *fetch_node(ServerConfig *config, upload_progress_node_t *node) {
@@ -383,13 +383,45 @@ static apr_status_t upload_progress_cleanup(void *data)
 	if(ctx->r->status >= HTTP_BAD_REQUEST) 
 	    ctx->node->err_status = ctx->r->status;
         ctx->node->done = 1;
+        ctx->node->expires = time(NULL) + 60; /*expires in 60s */
     }
     return APR_SUCCESS;
+}
+
+static void clean_old_connections(request_rec *r) {
+    upload_progress_node_t *prev = NULL;
+    ServerConfig *config = get_server_config(r);
+    CACHE_LOCK();
+    upload_progress_node_t *node = fetch_first_node(config);
+    while(node != NULL) {
+        if(time(NULL) > node->expires) {
+            /*clean*/
+	    if(prev == NULL) {
+		/* head */
+		upload_progress_cache_t *cache = fetch_cache(config);
+		cache->head = fetch_node(config, node->next);
+		cache_free(config, node->key);
+		cache_free(config, node);
+		node = cache->head;
+		continue;
+	    } else {
+		prev->next = node->next;
+		cache_free(config, node->key);
+		cache_free(config, node);
+		continue;
+	    }
+        }
+	prev = node;
+	node = fetch_node(config, node->next);
+  }
+  CACHE_UNLOCK();
 }
 
 int add_upload_to_track(request_rec* r, const char* key) {
   ServerConfig *config = get_server_config(r);
   upload_progress_node_t* node;
+  
+  clean_old_connections(r);
 
   CACHE_LOCK();
   node = find_node(r, key);
@@ -559,7 +591,7 @@ int upload_progress_init(apr_pool_t *p, apr_pool_t *plog,
 
 static int reportuploads_handler(request_rec *r)
 { 
-    int length, uploaded, done, err_status, found;
+    int length, uploaded, done, err_status, found=0;
     char *response;
     DirConfig* dir = (DirConfig*)ap_get_module_config(r->per_dir_config, &upload_progress_module);
 

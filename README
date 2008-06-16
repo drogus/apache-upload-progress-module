@@ -2,7 +2,6 @@ Apache upload progress module. Works with mod_passenger (aka mod_rails).
 
 It's still in development.
 TODO:
-  - expire upload data after 60s
   - add more messages to logs for debugging
   - abbility to define shared cache size (currently size is 10kB)
 
