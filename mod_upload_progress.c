@@ -63,9 +63,6 @@ typedef struct {
 
 typedef struct {
   apr_rmm_off_t cache_offset;
-  int foo;
-  const char* bar;
-  char *dbm_file;
   apr_pool_t *pool;
 #if APR_HAS_THREADS
     apr_thread_mutex_t *mutex;          /* mutex lock for the connection list */
