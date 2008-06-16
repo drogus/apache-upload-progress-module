@@ -202,10 +202,9 @@ static int track_upload_progress(ap_filter_t *f, apr_bucket_brigade *bb,
                                  readbytes)) != APR_SUCCESS) {
        return rv;
      }
-    //brigade has 1024*8 bytes - in mod_passenger this is 1024*32
-    //without that line, relying only on readbytes we end up
-    //getting 4 times bigger size
-    int length = sizeof(*bb)/sizeof(apr_bucket_brigade)*1024*8;
+
+    apr_off_t length;
+    apr_brigade_length(bb, 1, &length);
     const char* id = get_progress_id(f->r);
     if(id == NULL) 
         return APR_SUCCESS;
@@ -217,7 +216,7 @@ static int track_upload_progress(ap_filter_t *f, apr_bucket_brigade *bb,
       return APR_SUCCESS;
     } else {
       CACHE_LOCK();
-      node->uploaded += length;
+      node->uploaded += (int)length;
       CACHE_UNLOCK();
     }
     
