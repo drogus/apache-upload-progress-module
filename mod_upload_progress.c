@@ -528,7 +528,7 @@ int upload_progress_init(apr_pool_t *p, apr_pool_t *plog,
         result = upload_progress_cache_init(p, config);
         if (result != APR_SUCCESS) {
             ap_log_error(APLOG_MARK, APLOG_ERR, result, s,
-                         "LDAP cache: could not create shared memory segment");
+                         "Upload Progress cache: could not create shared memory segment");
             return DONE;
         }
 
