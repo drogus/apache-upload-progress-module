@@ -662,9 +662,8 @@ static int reportuploads_handler(request_rec *r)
         err_status = node->err_status;
         found = 1;
         CACHE_UNLOCK();
-    } else {
-        return HTTP_NOT_FOUND;
     }
+    
     CACHE_UNLOCK();
 
     ap_set_content_type(r, "text/javascript");
