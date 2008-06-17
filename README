@@ -1,4 +1,4 @@
-Apache upload progress module. Works with mod_passenger (aka mod_rails).
+Apache upload progress module. Works with mod_passenger (aka mod_rails). It's MIT license.
 
 It's still in development.
 TODO:
