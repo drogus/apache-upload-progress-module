@@ -82,6 +82,7 @@ typedef struct {
   
 } ServerConfig;
 
+static const char* upload_progress_shared_memory_size_cmd(cmd_parms *cmd, void *dummy, const char *arg);
 static void upload_progress_child_init(apr_pool_t *p, server_rec *s);
 static int reportuploads_handler(request_rec *r);
 upload_progress_node_t* insert_node(request_rec *r, const char *key);
@@ -109,6 +110,8 @@ static const command_rec upload_progress_cmds[] =
                  "Track upload progress in this location"),
     AP_INIT_FLAG("ReportUploads", (CmdFunc) report_upload_progress_cmd, NULL, OR_AUTHCFG,
                  "Report upload progress in this location"),
+    AP_INIT_TAKE1("UploadProgressSharedMemorySize", (CmdFunc) upload_progress_shared_memory_size_cmd, NULL, RSRC_CONF,
+                 "Size of shared memory used to keep uploads data, default 100KB"),
     { NULL }
 };
 
@@ -171,6 +174,20 @@ static const char *track_upload_progress_cmd(cmd_parms *cmd, void *config, int a
 {
     DirConfig* dir = (DirConfig*)config ;
     dir->track_enabled = arg;
+    return NULL;
+}
+
+static const char* upload_progress_shared_memory_size_cmd(cmd_parms *cmd, void *dummy,
+                                           const char *arg) {
+    ServerConfig *config = (ServerConfig*)ap_get_module_config(cmd->server->module_config, &upload_progress_module);
+
+    int n = atoi(arg);
+
+    if (n <= 0) {
+        return "UploadProgressSharedMemorySize should be positive";
+    }
+
+    config->cache_bytes = (apr_size_t)n;
     return NULL;
 }
 
