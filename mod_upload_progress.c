@@ -133,15 +133,22 @@ static int upload_progress_handle_request(request_rec *r)
   ServerConfig *config = get_server_config(r);
   
   if(dir->track_enabled) {
-    const char* id = get_progress_id(r);
-    if(id != NULL) {
-      if(r->method_number == M_POST) {
+    if(r->method_number == M_POST) {
+      ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, r->server,
+                         "Upload Progress: Upload in trackable location: %s.", r->uri);
+      const char* id = get_progress_id(r);
+      if(id != NULL) {
+        ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, r->server,
+                         "Upload Progress: Progress id found: %s.", id);
         CACHE_LOCK();
         upload_progress_node_t *node = find_node(r, id);
 	CACHE_UNLOCK();
         if(node == NULL) {
           add_upload_to_track(r, id);
           ap_add_input_filter("UPLOAD_PROGRESS", NULL, r, r->connection);
+	} else {
+          ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, r->server,
+                         "Upload Progress: Node with id '%s' already exists.", id);
 	}
         return DECLINED;
       }
@@ -350,9 +357,13 @@ upload_progress_node_t* insert_node(request_rec *r, const char *key) {
     /* list is empty */
     cache = fetch_cache(config);
     cache->head = node;
+    ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, r->server,
+                         "Upload Progress: Inserted node into an empty list.");
   } else {
     upload_progress_node_t *tail = fetch_last_node(config);
     tail->next = node;
+    ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, r->server,
+                         "Upload Progress: Inserted node at the end of the list.");
   }
   
   node->length = r->clength;
@@ -435,6 +446,8 @@ int add_upload_to_track(request_rec* r, const char* key) {
   node = find_node(r, key);
   if(node == NULL) {
     node = insert_node(r, key);
+    ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, r->server,
+                         "Upload Progress: Added upload with id=%s to list.", key);
     upload_progress_context_t *ctx = (upload_progress_context_t*)apr_pcalloc(r->pool, sizeof(upload_progress_context_t));
     ctx->node = node;
     ctx->r = r;
@@ -543,7 +556,7 @@ int upload_progress_init(apr_pool_t *p, apr_pool_t *plog,
     void *data;
     const char *userdata_key = "upload_progress_init";
 
-    /* util_ldap_post_config() will be called twice. Don't bother
+    /* upload_progress_init will be called twice. Don't bother
      * going through all of the initialization on the first call
      * because it will just be thrown away.*/
     apr_pool_userdata_get(&data, userdata_key, s->process->pool);
@@ -595,7 +608,7 @@ int upload_progress_init(apr_pool_t *p, apr_pool_t *plog,
         result = unixd_set_global_mutex_perms(config->cache_lock);
         if (result != APR_SUCCESS) {
             ap_log_error(APLOG_MARK, APLOG_CRIT, result, s,
-                         "LDAP cache: failed to set mutex permissions");
+                         "Upload progress cache: failed to set mutex permissions");
             return result;
         }
 #endif
@@ -613,7 +626,7 @@ int upload_progress_init(apr_pool_t *p, apr_pool_t *plog,
             st_vhost->cache_offset = config->cache_offset;
             st_vhost->cache = config->cache;
             ap_log_error(APLOG_MARK, APLOG_DEBUG, result, s,
-                         "Upload Progress merging Shared Cache conf: shm=0x%pp rmm=0x%pp "
+                         "Upload Progress: merging Shared Cache conf: shm=0x%pp rmm=0x%pp "
                          "for VHOST: %s", config->cache_shm, config->cache_rmm,
                          s_vhost->server_hostname);
 #endif
@@ -649,24 +662,36 @@ static int reportuploads_handler(request_rec *r)
     const char *id = get_progress_id(r);
 
     if (id == NULL) {
+	ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, r->server,
+                         "Upload Progress: Not found id in location with reports enabled. uri=%s", id, r->uri);
         return HTTP_NOT_FOUND;
+    } else {
+        ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, r->server,
+                         "Upload Progress: Found id=%s in location with reports enables. uri=%s", id, r->uri);
     }
 
     ServerConfig *config = (ServerConfig*)ap_get_module_config(r->server->module_config, &upload_progress_module);
 
     if (config->cache_rmm == NULL) {
+        ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, r->server,
+                         "Upload Progress: Cache error while generating report");
         return HTTP_INTERNAL_SERVER_ERROR ;
     }
 
     CACHE_LOCK();
     upload_progress_node_t *node = find_node(r, id);
     if (node != NULL) {
+	ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, r->server,
+                         "Node with id=%s found for report", id);
         uploaded = node->uploaded;
         length = node->length;
         done = node->done;
         err_status = node->err_status;
         found = 1;
         CACHE_UNLOCK();
+    } else {
+        ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, r->server,
+                         "Node with id=%s not found for report", id);
     }
     
     CACHE_UNLOCK();
