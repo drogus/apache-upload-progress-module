@@ -1,16 +1,8 @@
 #include <ap_config.h>
-#include <httpd.h>
-#include <http_config.h>
 #include <http_core.h>
-#include <http_request.h>
-#include <http_protocol.h>
 #include <http_log.h>
-#include <util_script.h>
 #include <apr_pools.h>
 #include <apr_strings.h>
-#include <apr_lib.h>
-#include "apr.h"
-#include "apr_optional.h"
 #include "unixd.h"
 
 #if APR_HAS_SHARED_MEMORY
@@ -22,7 +14,6 @@
 #include <unistd.h>
 #endif
 
-#define INT_LEN 32
 #define PROGRESS_ID "X-Progress-ID"
 
 #define CACHE_LOCK() do {                                  \
@@ -65,9 +56,6 @@ typedef struct {
 typedef struct {
   apr_rmm_off_t cache_offset;
   apr_pool_t *pool;
-#if APR_HAS_THREADS
-    apr_thread_mutex_t *mutex;          /* mutex lock for the connection list */
-#endif
   apr_global_mutex_t *cache_lock;
   char *lock_file;           /* filename for shm lock mutex */
   apr_size_t cache_bytes; 
