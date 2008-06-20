@@ -1,9 +1,5 @@
 Apache upload progress module. Works with mod_passenger (aka mod_rails). It's MIT license.
 
-It has not been tested in production yet.
-TODO:
-  - add more messages to logs for debugging
-
 To install and activate module:
 apxs2 -c -i -a mod_upload_progress.c
 
