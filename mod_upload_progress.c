@@ -705,11 +705,10 @@ static int reportuploads_handler(request_rec *r)
     
     CACHE_UNLOCK();
 
-    ap_set_content_type(r, "text/javascript");
+    ap_set_content_type(r, "application/json");
 
     apr_table_set(r->headers_out, "Expires", "Mon, 28 Sep 1970 06:00:00 GMT");
     apr_table_set(r->headers_out, "Cache-Control", "no-cache");
-    apr_table_set(r->headers_out, "Content-Type", "application/json");
 
 /*
  There are 4 possibilities
