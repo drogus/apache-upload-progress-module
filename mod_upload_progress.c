@@ -229,11 +229,11 @@ static int track_upload_progress(ap_filter_t *f, apr_bucket_brigade *bb,
     if(node == NULL) {
       return APR_SUCCESS;
     } else {
-      int time = time(NULL) - node->started_at;
       CACHE_LOCK();
       node->received += (int)length;
-      if(time > 0) {
-        node->speed = (int)(node->received / time);
+      int upload_time = time(NULL) - node->started_at;
+      if(upload_time > 0) {
+        node->speed = (int)(node->received / upload_time);
       }
       CACHE_UNLOCK();
     }
