@@ -197,7 +197,7 @@ upload_progress_config_create_dir(apr_pool_t *p, char *dirspec) {
 void *upload_progress_config_create_server(apr_pool_t *p, server_rec *s) {
 	ServerConfig *config = (ServerConfig *)apr_pcalloc(p, sizeof(ServerConfig));
         config->cache_file = apr_pstrdup(p, "/tmp/upload_progress_cache");
-        config->cache_bytes = 10240;
+        config->cache_bytes = 51200;
         apr_pool_create(&config->pool, p);
         return config;
 }
