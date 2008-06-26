@@ -35,9 +35,11 @@ typedef struct {
 typedef struct upload_progress_node_s{
   int done;
   int length;
-  int uploaded;
+  int received;
   int err_status;
   char *key;
+  int started_at;
+  int speed; /* bytes per second */
   time_t expires;
   struct upload_progress_node_s* next;
   struct upload_progress_node_s* prev;
@@ -227,8 +229,12 @@ static int track_upload_progress(ap_filter_t *f, apr_bucket_brigade *bb,
     if(node == NULL) {
       return APR_SUCCESS;
     } else {
+      int time = time(NULL) - node->started_at;
       CACHE_LOCK();
-      node->uploaded += (int)length;
+      node->received += (int)length;
+      if(time > 0) {
+        node->speed = (int)(node->received / time);
+      }
       CACHE_UNLOCK();
     }
     
@@ -367,9 +373,11 @@ upload_progress_node_t* insert_node(request_rec *r, const char *key) {
   }
   
   node->length = r->clength;
-  node->uploaded = 0;
+  node->received = 0;
   node->done = 0;
   node->err_status = 0;
+  node->started_at = time(NULL);
+  node->speed = 0;
   sscanf(apr_table_get(r->headers_in, "Content-Length"), "%d", &(node->length));
   node->next = NULL;
   CACHE_UNLOCK();
@@ -647,7 +655,7 @@ int upload_progress_init(apr_pool_t *p, apr_pool_t *plog,
 
 static int reportuploads_handler(request_rec *r)
 { 
-    int length, uploaded, done, err_status, found=0;
+    int length, received, done, speed, err_status, found=0;
     char *response;
     DirConfig* dir = (DirConfig*)ap_get_module_config(r->per_dir_config, &upload_progress_module);
 
@@ -683,9 +691,10 @@ static int reportuploads_handler(request_rec *r)
     if (node != NULL) {
 	ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, r->server,
                          "Node with id=%s found for report", id);
-        uploaded = node->uploaded;
+        received = node->received;
         length = node->length;
         done = node->done;
+        speed = node->speed;
         err_status = node->err_status;
         found = 1;
         CACHE_UNLOCK();
@@ -717,10 +726,10 @@ static int reportuploads_handler(request_rec *r)
         response = apr_psprintf(r->pool, "new Object({ 'state' : 'error', 'status' : %d })\r\n", err_status);
     } else if (done) {
         response = apr_psprintf(r->pool, "new Object({ 'state' : 'done' })\r\n");
-    } else if ( length == 0 && uploaded == 0 ) {
+    } else if ( length == 0 && received == 0 ) {
         response = apr_psprintf(r->pool, "new Object({ 'state' : 'starting' })\r\n");
     } else {
-        response = apr_psprintf(r->pool, "new Object({ 'state' : 'uploading', 'received' : %d, 'size' : %d })\r\n", uploaded, length);
+        response = apr_psprintf(r->pool, "new Object({ 'state' : 'uploading', 'received' : %d, 'size' : %d, 'speed' : %d  })\r\n", received, length, speed);
     }
 
     ap_rputs(response, r);
