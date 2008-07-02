@@ -1,5 +1,7 @@
 Apache upload progress module. Works with mod_passenger (aka mod_rails). It's MIT license.
 
+more info here: http://drogomir.com/blog/2008/6/18/upload-progress-bar-with-mod_passenger-and-apache
+
 To install and activate module:
 apxs2 -c -i -a mod_upload_progress.c
 
@@ -21,3 +23,5 @@ Config for vhost:
     # enable upload progress reports in /progress
     ReportUploads On
 </Location>
+
+
