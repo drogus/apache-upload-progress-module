@@ -346,7 +346,9 @@ upload_progress_node_t *store_node(ServerConfig *config, const char *key) {
   
   block = apr_rmm_calloc(config->cache_rmm, strlen(key)+1);
   node->key = block ? (char *)apr_rmm_addr_get(config->cache_rmm, block) : NULL;
-  sprintf(node->key, "%s\0", key);
+  if(node->key != NULL) {
+    sprintf(node->key, "%s\0", key);
+  }
   return node;
 }
 
