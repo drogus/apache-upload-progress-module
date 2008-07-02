@@ -339,13 +339,14 @@ upload_progress_node_t *store_node(ServerConfig *config, const char *key) {
   upload_progress_node_t *node;
    
   node = block ? (upload_progress_node_t *)apr_rmm_addr_get(config->cache_rmm, block) : NULL;
+  node->next = NULL;
   if(node == NULL) {
     return NULL;
   }
   
-  block = apr_rmm_calloc(config->cache_rmm, strlen(key));
+  block = apr_rmm_calloc(config->cache_rmm, strlen(key)+1);
   node->key = block ? (char *)apr_rmm_addr_get(config->cache_rmm, block) : NULL;
-  strcpy(node->key, key);
+  sprintf(node->key, "%s\0", key);
   return node;
 }
 
@@ -378,6 +379,7 @@ upload_progress_node_t* insert_node(request_rec *r, const char *key) {
   node->err_status = 0;
   node->started_at = time(NULL);
   node->speed = 0;
+  node->expires = -1;
   sscanf(apr_table_get(r->headers_in, "Content-Length"), "%d", &(node->length));
   node->next = NULL;
   CACHE_UNLOCK();
@@ -421,7 +423,7 @@ static void clean_old_connections(request_rec *r) {
     CACHE_LOCK();
     upload_progress_node_t *node = fetch_first_node(config);
     while(node != NULL) {
-        if(time(NULL) > node->expires && node->done == 1) {
+        if(time(NULL) > node->expires && node->done == 1 && node->expires != -1) {
             /*clean*/
 	    if(prev == NULL) {
 		/* head */
@@ -435,6 +437,7 @@ static void clean_old_connections(request_rec *r) {
 		prev->next = node->next;
 		cache_free(config, node->key);
 		cache_free(config, node);
+		node = prev;
 		continue;
 	    }
         }
