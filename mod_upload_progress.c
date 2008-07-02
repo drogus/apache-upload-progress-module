@@ -421,7 +421,7 @@ static void clean_old_connections(request_rec *r) {
     CACHE_LOCK();
     upload_progress_node_t *node = fetch_first_node(config);
     while(node != NULL) {
-        if(time(NULL) > node->expires) {
+        if(time(NULL) > node->expires && node->done == 1) {
             /*clean*/
 	    if(prev == NULL) {
 		/* head */
