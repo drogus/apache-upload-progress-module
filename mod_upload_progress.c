@@ -17,8 +17,14 @@
 #define PROGRESS_ID "X-Progress-ID"
 
 #define CACHE_LOCK() do {                                  \
-    if (config->cache_lock)                               \
-        apr_global_mutex_lock(config->cache_lock);        \
+    if (config->cache_lock) {                              \
+        char errbuf[200];                                  \
+        apr_status_t status = apr_global_mutex_lock(config->cache_lock);        \
+        if (status != APR_SUCCESS) {                          \
+            ap_log_error(APLOG_MARK, APLOG_CRIT, status, 0, \
+                       "%s", apr_strerror(status, errbuf, sizeof(errbuf))); \
+        }                                                  \
+    } \
 } while (0)
 
 #define CACHE_UNLOCK() do {                                \
