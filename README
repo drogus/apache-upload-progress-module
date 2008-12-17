@@ -17,7 +17,8 @@ Global config:
   UploadProgressSharedMemorySize 1024000 # sets memory size to 1MB
 
 Note:
-If you get "(12)Cannot allocate memory: Upload Progress cache: could not create shared memory segment Configuration Failed" error you should try to set memory size to smaller value.
+If you get "(12)Cannot allocate memory: Upload Progress cache: could not create shared memory segment Configuration Failed" 
+error you should try to set memory size to smaller value.
 
 Config for vhost:
 <Location />
