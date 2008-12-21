@@ -118,7 +118,7 @@ module AP_MODULE_DECLARE_DATA upload_progress_module =
 
 static void upload_progress_register_hooks (apr_pool_t *p)
 {
-  ap_hook_handler(upload_progress_handle_request, NULL, NULL, APR_HOOK_FIRST);
+  ap_hook_fixups(upload_progress_handle_request, NULL, NULL, APR_HOOK_FIRST);
   ap_hook_handler(reportuploads_handler, NULL, NULL, APR_HOOK_FIRST);
   ap_hook_post_config(upload_progress_init, NULL, NULL, APR_HOOK_MIDDLE);
   ap_hook_child_init(upload_progress_child_init, NULL, NULL, APR_HOOK_MIDDLE);
