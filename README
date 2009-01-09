@@ -1,6 +1,10 @@
 Apache upload progress module. Works with mod_passenger (aka mod_rails). It's MIT license.
 
-more info here: http://drogomir.com/blog/2008/6/18/upload-progress-bar-with-mod_passenger-and-apache
+More info here: http://drogomir.com/blog/2008/6/18/upload-progress-bar-with-mod_passenger-and-apache
+
+Tutorials showing how to use apache upload progress module:
+http://www.drogomir.com/blog/2008/7/3/tweaking-rails-app-with-jquery-part-i (using jQuery)
+http://www.railsillustrated.com/screencast-file-uploads-progress-in-rails-passenger.html (tutorial with screencast using prototype)
 
 To install and activate module:
 apxs2 -c -i -a mod_upload_progress.c
