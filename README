@@ -35,3 +35,17 @@ Config for vhost:
     ReportUploads On
 </Location>
 
+- JSON-P Support
+You can also request progress updates by using JSON-P, if you are uploading the file from a different domain or subdomain than the web server that is handling your original request. Adding a "callback=yourCallbackFunction" parameter to your request to the progress server will activate this functionality. 
+
+For example, a request like:
+  http://uploads.yourdomain.com/progress?callback=jsonp123&X-Progress-ID=1234
+  
+Would return the JSON-P function: 
+  jsonp123(new Object({ 'state' : 'uploading', 'received' : 35587, 'size' : 716595, 'speed' : 35587 }));
+  
+The normal JSON request:
+  http://www.yourdomain.com/progress?X-Progress-ID=1234
+
+Would return the JSON data: 
+  new Object({ 'state' : 'uploading', 'received' : 35587, 'size' : 716595, 'speed' : 35587 })
