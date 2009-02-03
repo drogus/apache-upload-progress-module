@@ -276,6 +276,37 @@ const char *get_progress_id(request_rec *r) {
   return id;
 }
 
+const char *get_json_callback_param(request_rec *r) {
+  char *p, *start_p, *end_p;
+  int i;
+  const char *callback;
+  if (r->args) {
+      i = 0;
+      p = r->args;
+      do {
+          int len = strlen(p);
+          if (len >= 9 && strncasecmp(p, "callback=", 9) == 0) {
+              i = 1;
+              break;
+          }
+          if (len<=0)
+              break;
+      } 
+      while(p++);
+
+      if (i) {
+          i = 0;
+          start_p = p += 9;
+          end_p = r->args + strlen(r->args);
+          while (p <= end_p && *p++ != '&') {
+              i++;
+          }
+          return apr_pstrndup(r->connection->pool, start_p, p-start_p-1);
+      }
+  }
+  return callback;
+}
+
 void cache_free(ServerConfig *config, const void *ptr)
 {
   if (config->cache_rmm) {
@@ -715,6 +746,7 @@ static int reportuploads_handler(request_rec *r)
     apr_table_set(r->headers_out, "Expires", "Mon, 28 Sep 1970 06:00:00 GMT");
     apr_table_set(r->headers_out, "Cache-Control", "no-cache");
 
+
 /*
  There are 4 possibilities
    * request not yet started: found = false
@@ -724,19 +756,32 @@ static int reportuploads_handler(request_rec *r)
    * reauest in progress:     rest > 0 
  */
 
+   
     if (!found) {
-        response = apr_psprintf(r->pool, "new Object({ 'state' : 'starting' })\r\n");
+      response = apr_psprintf(r->pool, "new Object({ 'state' : 'starting' })");
     } else if (err_status >= HTTP_BAD_REQUEST  ) {
-        response = apr_psprintf(r->pool, "new Object({ 'state' : 'error', 'status' : %d })\r\n", err_status);
+      response = apr_psprintf(r->pool, "new Object({ 'state' : 'error', 'status' : %d })", err_status);
     } else if (done) {
-        response = apr_psprintf(r->pool, "new Object({ 'state' : 'done' })\r\n");
+      response = apr_psprintf(r->pool, "new Object({ 'state' : 'done' })");
     } else if ( length == 0 && received == 0 ) {
-        response = apr_psprintf(r->pool, "new Object({ 'state' : 'starting' })\r\n");
+      response = apr_psprintf(r->pool, "new Object({ 'state' : 'starting' })");
     } else {
-        response = apr_psprintf(r->pool, "new Object({ 'state' : 'uploading', 'received' : %d, 'size' : %d, 'speed' : %d  })\r\n", received, length, speed);
+      response = apr_psprintf(r->pool, "new Object({ 'state' : 'uploading', 'received' : %d, 'size' : %d, 'speed' : %d  })", received, length, speed);
     }
 
-    ap_rputs(response, r);
+    char *completed_response;
+    
+    /* get the jsonp callback if any */
+    const char *jsonp = get_json_callback_param(r);
+    
+    // fix up response for jsonp request, if needed
+    if (jsonp) {
+      completed_response = apr_psprintf(r->pool, "%s(%s);\r\n", jsonp, response);
+    } else {
+      completed_response = apr_psprintf(r->pool, "%s\r\n", response);
+    }
+    
+    ap_rputs(completed_response, r);
 
     return OK;
 }
