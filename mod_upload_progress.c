@@ -279,7 +279,8 @@ const char *get_progress_id(request_rec *r) {
 const char *get_json_callback_param(request_rec *r) {
   char *p, *start_p, *end_p;
   int i;
-  const char *callback;
+  const char *callback = NULL;
+
   if (r->args) {
       i = 0;
       p = r->args;
@@ -773,7 +774,10 @@ static int reportuploads_handler(request_rec *r)
     
     /* get the jsonp callback if any */
     const char *jsonp = get_json_callback_param(r);
-    
+   
+    ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, r->server,
+                       "Upload Progress: JSON-P callback: %s.", jsonp);
+
     // fix up response for jsonp request, if needed
     if (jsonp) {
       completed_response = apr_psprintf(r->pool, "%s(%s);\r\n", jsonp, response);
