@@ -231,6 +231,8 @@ static int track_upload_progress(ap_filter_t *f, apr_bucket_brigade *bb,
     } else {
       CACHE_LOCK();
       node->received += (int)length;
+      if(node->received > node->length) /* handle chunked tranfer */
+        node->length = node->received;
       int upload_time = time(NULL) - node->started_at;
       if(upload_time > 0) {
         node->speed = (int)(node->received / upload_time);
@@ -384,6 +386,22 @@ upload_progress_node_t *store_node(ServerConfig *config, const char *key) {
   return node;
 }
 
+/* should be called with CACHE_LOCK held */
+void fill_new_upload_node_data(upload_progress_node_t *node, request_rec *r) {
+  const char *content_length;
+
+  node->received = 0;
+  node->done = 0;
+  node->err_status = 0;
+  node->started_at = time(NULL);
+  node->speed = 0;
+  node->expires = -1;
+  content_length = apr_table_get(r->headers_in, "Content-Length");
+  node->length = 1;
+  /* Content-Length is missing is case of chunked transfer encoding */
+  if (content_length) sscanf(content_length, "%d", &(node->length));
+}
+
 upload_progress_node_t* insert_node(request_rec *r, const char *key) {
   upload_progress_node_t *node;
   upload_progress_cache_t *cache;
@@ -406,15 +424,7 @@ upload_progress_node_t* insert_node(request_rec *r, const char *key) {
     ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, r->server,
                          "Upload Progress: Inserted node at the end of the list.");
   }
-  
-  node->length = r->clength;
-  node->received = 0;
-  node->done = 0;
-  node->err_status = 0;
-  node->started_at = time(NULL);
-  node->speed = 0;
-  node->expires = -1;
-  sscanf(apr_table_get(r->headers_in, "Content-Length"), "%d", &(node->length));
+  fill_new_upload_node_data(node, r);
   node->next = NULL;
   CACHE_UNLOCK();
   return node;
