@@ -144,14 +144,14 @@ static int upload_progress_handle_request(request_rec *r)
                          "Upload Progress: Progress id found: %s.", id);
         CACHE_LOCK();
         upload_progress_node_t *node = find_node(r, id);
-	CACHE_UNLOCK();
-        if(node == NULL) {
+        if (node == NULL) {
           add_upload_to_track(r, id);
           ap_add_input_filter("UPLOAD_PROGRESS", NULL, r, r->connection);
 	} else {
           ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, r->server,
                          "Upload Progress: Node with id '%s' already exists.", id);
 	}
+	CACHE_UNLOCK();
         return DECLINED;
       }
     }
@@ -211,34 +211,30 @@ static int track_upload_progress(ap_filter_t *f, apr_bucket_brigade *bb,
     apr_status_t rv;
     upload_progress_node_t *node;
     ServerConfig* config = get_server_config(f->r);
-    
-     if ((rv = ap_get_brigade(f->next, bb, mode, block,
+
+    if ((rv = ap_get_brigade(f->next, bb, mode, block,
                                  readbytes)) != APR_SUCCESS) {
-       return rv;
-     }
+      return rv;
+    }
 
     apr_off_t length;
     apr_brigade_length(bb, 1, &length);
     const char* id = get_progress_id(f->r);
-    if(id == NULL) 
+    if (id == NULL)
         return APR_SUCCESS;
 
     CACHE_LOCK();
     node = find_node(f->r, id);
-    CACHE_UNLOCK();
-    if(node == NULL) {
-      return APR_SUCCESS;
-    } else {
-      CACHE_LOCK();
+    if (node != NULL) {
       node->received += (int)length;
-      if(node->received > node->length) /* handle chunked tranfer */
+      if (node->received > node->length) /* handle chunked tranfer */
         node->length = node->received;
       int upload_time = time(NULL) - node->started_at;
-      if(upload_time > 0) {
+      if (upload_time > 0) {
         node->speed = (int)(node->received / upload_time);
       }
-      CACHE_UNLOCK();
     }
+    CACHE_UNLOCK();
     
     return APR_SUCCESS;
 }
@@ -386,7 +382,6 @@ upload_progress_node_t *store_node(ServerConfig *config, const char *key) {
   return node;
 }
 
-/* should be called with CACHE_LOCK held */
 void fill_new_upload_node_data(upload_progress_node_t *node, request_rec *r) {
   const char *content_length;
 
@@ -408,7 +403,6 @@ upload_progress_node_t* insert_node(request_rec *r, const char *key) {
   
   ServerConfig *config = (ServerConfig*)ap_get_module_config(r->server->module_config, &upload_progress_module);
   
-  CACHE_LOCK();
   upload_progress_node_t *head = fetch_first_node(config);
   node = store_node(config, key);
   
@@ -426,7 +420,6 @@ upload_progress_node_t* insert_node(request_rec *r, const char *key) {
   }
   fill_new_upload_node_data(node, r);
   node->next = NULL;
-  CACHE_UNLOCK();
   return node;
 }
 
@@ -451,12 +444,13 @@ upload_progress_node_t *find_node(request_rec *r, const char *key) {
 
 static apr_status_t upload_progress_cleanup(void *data)
 {
+    /* FIXME: this function should use locking because it modifies node data */
     upload_progress_context_t *ctx = (upload_progress_context_t *)data;
     if (ctx->node) {
 	if(ctx->r->status >= HTTP_BAD_REQUEST) 
 	    ctx->node->err_status = ctx->r->status;
-        ctx->node->done = 1;
         ctx->node->expires = time(NULL) + 60; /*expires in 60s */
+        ctx->node->done = 1;
     }
     return APR_SUCCESS;
 }
@@ -464,7 +458,7 @@ static apr_status_t upload_progress_cleanup(void *data)
 static void clean_old_connections(request_rec *r) {
     upload_progress_node_t *prev = NULL;
     ServerConfig *config = get_server_config(r);
-    CACHE_LOCK();
+
     upload_progress_node_t *node = fetch_first_node(config);
     while(node != NULL) {
         if(time(NULL) > node->expires && node->done == 1 && node->expires != -1) {
@@ -487,17 +481,15 @@ static void clean_old_connections(request_rec *r) {
         }
 	prev = node;
 	node = fetch_node(config, node->next);
-  }
-  CACHE_UNLOCK();
+    }
 }
 
 int add_upload_to_track(request_rec* r, const char* key) {
   ServerConfig *config = get_server_config(r);
   upload_progress_node_t* node;
-  
+
   clean_old_connections(r);
 
-  CACHE_LOCK();
   node = find_node(r, key);
   if(node == NULL) {
     node = insert_node(r, key);
@@ -506,11 +498,8 @@ int add_upload_to_track(request_rec* r, const char* key) {
     upload_progress_context_t *ctx = (upload_progress_context_t*)apr_pcalloc(r->pool, sizeof(upload_progress_context_t));
     ctx->node = node;
     ctx->r = r;
-    CACHE_UNLOCK();
     apr_pool_cleanup_register(r->pool, ctx, upload_progress_cleanup, apr_pool_cleanup_null);
-    return OK;
   }
-  CACHE_UNLOCK();
   return OK;
 }
 
@@ -582,20 +571,15 @@ apr_status_t upload_progress_cache_init(apr_pool_t *pool, ServerConfig *config)
     apr_pool_cleanup_register(config->pool, config , upload_progress_cache_module_kill, apr_pool_cleanup_null);
     
     /* init cache object */
-    CACHE_LOCK();
     block = apr_rmm_calloc(config->cache_rmm, sizeof(upload_progress_cache_t));
     cache = block ? (upload_progress_cache_t *)apr_rmm_addr_get(config->cache_rmm, block) : NULL;
-    if(cache == NULL) {
-      CACHE_UNLOCK();
+    if (cache == NULL) {
       return 0;
     }
     cache->head = NULL;
     config->cache_offset = block;
     config->cache = cache;
-    CACHE_UNLOCK();
-    
 #endif
-
     return APR_SUCCESS;
 }
 
@@ -744,7 +728,6 @@ static int reportuploads_handler(request_rec *r)
         speed = node->speed;
         err_status = node->err_status;
         found = 1;
-        CACHE_UNLOCK();
     } else {
         ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, r->server,
                          "Node with id=%s not found for report", id);
@@ -806,6 +789,8 @@ static void upload_progress_child_init(apr_pool_t *p, server_rec *s)
     apr_status_t sts;
     ServerConfig *st = (ServerConfig *)ap_get_module_config(s->module_config,
                                                  &upload_progress_module);
+    server_rec *s_vhost;
+    ServerConfig *st_vhost;
 
     if (!st->cache_lock) return;
 
@@ -816,5 +801,12 @@ static void upload_progress_child_init(apr_pool_t *p, server_rec *s)
                      "Failed to initialise global mutex %s in child process %"
                      APR_PID_T_FMT ".",
                      st->lock_file, getpid());
+    }
+    s_vhost = s->next;
+    while (s_vhost) {
+        st_vhost = (ServerConfig *)ap_get_module_config(s_vhost->module_config,
+                                            &upload_progress_module);
+        st_vhost->cache_lock = st->cache_lock;
+        s_vhost = s_vhost->next;
     }
 }
