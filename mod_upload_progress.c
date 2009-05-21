@@ -369,15 +369,18 @@ upload_progress_node_t *store_node(ServerConfig *config, const char *key) {
   upload_progress_node_t *node;
    
   node = block ? (upload_progress_node_t *)apr_rmm_addr_get(config->cache_rmm, block) : NULL;
-  node->next = NULL;
-  if(node == NULL) {
+  if (node == NULL) {
     return NULL;
   }
+  node->next = NULL;
   
   block = apr_rmm_calloc(config->cache_rmm, strlen(key)+1);
   node->key = block ? (char *)apr_rmm_addr_get(config->cache_rmm, block) : NULL;
-  if(node->key != NULL) {
+  if (node->key != NULL) {
     sprintf(node->key, "%s\0", key);
+  } else {
+    apr_rmm_free(config->cache_rmm, apr_rmm_offset_get(config->cache_rmm, (void *)node));
+    node = NULL;
   }
   return node;
 }
@@ -405,8 +408,10 @@ upload_progress_node_t* insert_node(request_rec *r, const char *key) {
   
   upload_progress_node_t *head = fetch_first_node(config);
   node = store_node(config, key);
+  if (node == NULL)
+    return NULL;
   
-  if(head == NULL) { 
+  if (head == NULL) { 
     /* list is empty */
     cache = fetch_cache(config);
     cache->head = node;
@@ -491,8 +496,10 @@ int add_upload_to_track(request_rec* r, const char* key) {
   clean_old_connections(r);
 
   node = find_node(r, key);
-  if(node == NULL) {
+  if (node == NULL) {
     node = insert_node(r, key);
+    if (node == NULL)
+      return OK;
     ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, r->server,
                          "Upload Progress: Added upload with id=%s to list.", key);
     upload_progress_context_t *ctx = (upload_progress_context_t*)apr_pcalloc(r->pool, sizeof(upload_progress_context_t));
@@ -507,7 +514,6 @@ void upload_progress_destroy_cache(ServerConfig *config) {
     upload_progress_cache_t *cache = fetch_cache(config);
     upload_progress_node_t *node, *temp;
    
-    cache_free(config, cache);
     node = fetch_node(config, cache->head);
     while(node != NULL) {
       temp = fetch_node(config, node->next);
@@ -515,6 +521,7 @@ void upload_progress_destroy_cache(ServerConfig *config) {
       cache_free(config, node);
       node = temp;
     }
+    cache_free(config, cache);
 }
 
 static apr_status_t upload_progress_cache_module_kill(void *data)
