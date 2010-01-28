@@ -466,10 +466,17 @@ static apr_status_t upload_progress_cleanup(void *data)
 {
     /* FIXME: this function should use locking because it modifies node data */
     upload_progress_context_t *ctx = (upload_progress_context_t *)data;
+    int status;
+
     if (ctx->node) {
-	if(ctx->r->status >= HTTP_BAD_REQUEST) 
-	    ctx->node->err_status = ctx->r->status;
-        ctx->node->expires = time(NULL) + 60; /*expires in 60s */
+        /* error status rendered in status line is preferred because passenger
+           clobbers request_rec->status when exception occurs */
+        status = ctx->r->status_line ? atoi(ctx->r->status_line) : 0;
+        if (!ap_is_HTTP_ERROR(status))
+            status = ctx->r->status;
+        if (ap_is_HTTP_ERROR(status))
+            ctx->node->err_status = status;
+        ctx->node->expires = time(NULL) + 60; /* expires in 60s */
         ctx->node->done = 1;
     }
     return APR_SUCCESS;
