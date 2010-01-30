@@ -3,3 +3,4 @@
 *~
 *.slo
 *.la
+local-options.mk
