@@ -18,7 +18,7 @@ local-shared-build: module
 
 module: .libs/mod_upload_progress.o
 
-.libs/mod_upload_progress.o:
+.libs/mod_upload_progress.o: mod_upload_progress.c
 	$(APXS) -c $(CFLAGS) mod_upload_progress.c
 
 #   install the shared object file into Apache 
