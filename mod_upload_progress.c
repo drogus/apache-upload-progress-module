@@ -243,31 +243,31 @@ static int track_upload_progress(ap_filter_t *f, apr_bucket_brigade *bb,
     upload_progress_node_t *node;
     ServerConfig* config = get_server_config(f->r);
 
-    if ((rv = ap_get_brigade(f->next, bb, mode, block,
-                                 readbytes)) != APR_SUCCESS) {
-      return rv;
-    }
+    rv = ap_get_brigade(f->next, bb, mode, block, readbytes);
 
-    apr_off_t length;
-    apr_brigade_length(bb, 1, &length);
     const char* id = get_progress_id(f->r);
     if (id == NULL)
-        return APR_SUCCESS;
+        return rv;
 
     CACHE_LOCK();
     node = find_node(f->r, id);
     if (node != NULL) {
-      node->received += (int)length;
-      if (node->received > node->length) /* handle chunked tranfer */
-        node->length = node->received;
-      int upload_time = time(NULL) - node->started_at;
-      if (upload_time > 0) {
-        node->speed = (int)(node->received / upload_time);
-      }
+        if (rv == APR_SUCCESS) {
+            apr_off_t length;
+            apr_brigade_length(bb, 1, &length);
+            node->received += (int)length;
+            if (node->received > node->length) /* handle chunked tranfer */
+                node->length = node->received;
+            int upload_time = time(NULL) - node->started_at;
+            if (upload_time > 0) {
+                node->speed = (int)(node->received / upload_time);
+            }
+        }
+        node->err_status = read_request_status(f->r);
     }
     CACHE_UNLOCK();
     
-    return APR_SUCCESS;
+    return rv;
 }
 
 const char *get_progress_id(request_rec *r) {
