@@ -219,6 +219,22 @@ void *upload_progress_config_create_server(apr_pool_t *p, server_rec *s) {
         return config;
 }
 
+int read_request_status(request_rec *r)
+{
+    int status;
+
+    if (r) {
+        /* error status rendered in status line is preferred because passenger
+           clobbers request_rec->status when exception occurs */
+        status = r->status_line ? atoi(r->status_line) : 0;
+        if (!ap_is_HTTP_VALID_RESPONSE(status))
+            status = r->status;
+        return status;
+    } else {
+        return 0;
+    }
+}
+
 static int track_upload_progress(ap_filter_t *f, apr_bucket_brigade *bb,
                            ap_input_mode_t mode, apr_read_type_e block,
                            apr_off_t readbytes)
@@ -466,16 +482,9 @@ static apr_status_t upload_progress_cleanup(void *data)
 {
     /* FIXME: this function should use locking because it modifies node data */
     upload_progress_context_t *ctx = (upload_progress_context_t *)data;
-    int status;
 
     if (ctx->node) {
-        /* error status rendered in status line is preferred because passenger
-           clobbers request_rec->status when exception occurs */
-        status = ctx->r->status_line ? atoi(ctx->r->status_line) : 0;
-        if (!ap_is_HTTP_ERROR(status))
-            status = ctx->r->status;
-        if (ap_is_HTTP_ERROR(status))
-            ctx->node->err_status = status;
+        ctx->node->err_status = read_request_status(ctx->r);
         ctx->node->expires = time(NULL) + 60; /* expires in 60s */
         ctx->node->done = 1;
     }
