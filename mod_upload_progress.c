@@ -753,16 +753,17 @@ static int reportuploads_handler(request_rec *r)
 
    
     if (!found) {
-      response = apr_psprintf(r->pool, "new Object({ 'state' : 'starting' })");
+      response = apr_psprintf(r->pool, "{ \"state\" : \"starting\" }");
     } else if (err_status >= HTTP_BAD_REQUEST  ) {
-      response = apr_psprintf(r->pool, "new Object({ 'state' : 'error', 'status' : %d })", err_status);
+      response = apr_psprintf(r->pool, "{ \"state\" : \"error\", \"status\" : %d }", err_status);
     } else if (done) {
-      response = apr_psprintf(r->pool, "new Object({ 'state' : 'done' })");
+      response = apr_psprintf(r->pool, "{ \"state\" : \"done\" }");
     } else if ( length == 0 && received == 0 ) {
-      response = apr_psprintf(r->pool, "new Object({ 'state' : 'starting' })");
+      response = apr_psprintf(r->pool, "{ \"state\" : \"starting\" }");
     } else {
-      response = apr_psprintf(r->pool, "new Object({ 'state' : 'uploading', 'received' : %d, 'size' : %d, 'speed' : %d  })", received, length, speed);
+      response = apr_psprintf(r->pool, "{ \"state\" : \"uploading\", \"received\" : %d, \"size\" : %d, \"speed\" : %d  }", received, length, speed);
     }
+
 
     char *completed_response;
     
