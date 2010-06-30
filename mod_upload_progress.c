@@ -15,7 +15,7 @@
 #endif
 
 #define PROGRESS_ID "upload_id"
-#define PROGRESS_ID_LEN = 9
+#define PROGRESS_ID_LEN 9
 
 #define CACHE_LOCK() do {                                  \
     if (config->cache_lock)                               \
