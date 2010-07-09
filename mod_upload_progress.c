@@ -278,7 +278,7 @@ const char *get_progress_id(request_rec *r) {
 
         if (i) {
             i = 0;
-            start_p = p += 14;
+            start_p = p += PROGRESS_ID_LEN;
             end_p = r->args + strlen(r->args);
             while (p <= end_p && *p++ != '&') {
                 i++;
