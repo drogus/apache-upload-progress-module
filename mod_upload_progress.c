@@ -770,7 +770,6 @@ static int reportuploads_handler(request_rec *r)
       response = apr_psprintf(r->pool, "{ \"state\" : \"uploading\", \"received\" : %d, \"size\" : %d, \"speed\" : %d  }", received, length, speed);
     }
 
-
     char *completed_response;
     
     /* get the jsonp callback if any */
