@@ -19,6 +19,7 @@
 #define CACHE_LOCK() do {                                  \
     if (config->cache_lock) {                              \
         char errbuf[200];                                  \
+        ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, config->server, "CACHE_LOCK()"); \
         apr_status_t status = apr_global_mutex_lock(config->cache_lock);        \
         if (status != APR_SUCCESS) {                          \
             ap_log_error(APLOG_MARK, APLOG_CRIT, status, 0, \
@@ -29,7 +30,10 @@
 
 #define CACHE_UNLOCK() do {                                \
     if (config->cache_lock)                               \
+    {	\
+        ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, config->server, "CACHE_UNLOCK()"); \
         apr_global_mutex_unlock(config->cache_lock);      \
+    }	\
 } while (0)
 
 typedef struct {
@@ -62,6 +66,7 @@ typedef struct {
 
 
 typedef struct {
+  server_rec *server;
   apr_rmm_off_t cache_offset;
   apr_pool_t *pool;
   apr_global_mutex_t *cache_lock;
@@ -222,6 +227,7 @@ void *upload_progress_config_create_server(apr_pool_t *p, server_rec *s) {
         config->cache_file = apr_pstrdup(p, "/tmp/upload_progress_cache");
         config->cache_bytes = 51200;
         apr_pool_create(&config->pool, p);
+        config->sever = s;
         return config;
 }
 
