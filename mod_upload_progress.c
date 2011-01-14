@@ -14,7 +14,8 @@
 #include <unistd.h>
 #endif
 
-#define PROGRESS_ID "X-Progress-ID"
+#define PROGRESS_ID "upload_id"
+#define PROGRESS_ID_LEN 9
 
 #define CACHE_LOCK() do {                                  \
     if (config->cache_lock) {                              \
@@ -294,7 +295,7 @@ const char *get_progress_id(request_rec *r) {
         p = r->args;
         do {
             int len = strlen(p);
-            if (len >= 14 && strncasecmp(p, "X-Progress-ID=", 14) == 0) {
+            if (len >= PROGRESS_ID_LEN && strncasecmp(p, PROGRESS_ID, PROGRESS_ID_LEN) == 0) {
                 i = 1;
                 break;
             }
@@ -305,7 +306,7 @@ const char *get_progress_id(request_rec *r) {
 
         if (i) {
             i = 0;
-            start_p = p += 14;
+            start_p = p += PROGRESS_ID_LEN;
             end_p = r->args + strlen(r->args);
             while (p <= end_p && *p++ != '&') {
                 i++;
@@ -715,7 +716,7 @@ int upload_progress_init(apr_pool_t *p, apr_pool_t *plog,
 
 static int reportuploads_handler(request_rec *r)
 { 
-    int length, received, done, speed, err_status, found=0;
+    int length, received, done, speed, err_status, found=0, started_at=0;
     char *response;
     DirConfig* dir = (DirConfig*)ap_get_module_config(r->per_dir_config, &upload_progress_module);
 
@@ -755,6 +756,7 @@ static int reportuploads_handler(request_rec *r)
         length = node->length;
         done = node->done;
         speed = node->speed;
+        started_at = node->started_at;
         err_status = node->err_status;
         found = 1;
     } else {
@@ -789,7 +791,7 @@ static int reportuploads_handler(request_rec *r)
     } else if ( length == 0 && received == 0 ) {
       response = apr_psprintf(r->pool, "{ \"state\" : \"starting\", \"uuid\" : \"%s\" }", id);
     } else {
-      response = apr_psprintf(r->pool, "{ \"state\" : \"uploading\", \"received\" : %d, \"size\" : %d, \"speed\" : %d, \"uuid\" : \"%s\"  }", received, length, speed, id);
+      response = apr_psprintf(r->pool, "{ \"state\" : \"uploading\", \"received\" : %d, \"size\" : %d, \"speed\" : %d, \"started_at\": %d, \"uuid\" : \"%s\" }", received, length, speed, started_at, id);
     }
 
     char *completed_response;
