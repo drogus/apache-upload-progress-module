@@ -759,15 +759,15 @@ static int reportuploads_handler(request_rec *r)
 
    
     if (!found) {
-      response = apr_psprintf(r->pool, "{ \"state\" : \"starting\" }");
+      response = apr_psprintf(r->pool, "{ \"state\" : \"starting\", \"uuid\" : \"%s\" }", id);
     } else if (err_status >= HTTP_BAD_REQUEST  ) {
-      response = apr_psprintf(r->pool, "{ \"state\" : \"error\", \"status\" : %d }", err_status);
+      response = apr_psprintf(r->pool, "{ \"state\" : \"error\", \"status\" : %d, \"uuid\" : \"%s\" }", err_status, id);
     } else if (done) {
-      response = apr_psprintf(r->pool, "{ \"state\" : \"done\" }");
+      response = apr_psprintf(r->pool, "{ \"state\" : \"done\", \"uuid\" : \"%s\" }", id);
     } else if ( length == 0 && received == 0 ) {
-      response = apr_psprintf(r->pool, "{ \"state\" : \"starting\" }");
+      response = apr_psprintf(r->pool, "{ \"state\" : \"starting\", \"uuid\" : \"%s\" }", id);
     } else {
-      response = apr_psprintf(r->pool, "{ \"state\" : \"uploading\", \"received\" : %d, \"size\" : %d, \"speed\" : %d  }", received, length, speed);
+      response = apr_psprintf(r->pool, "{ \"state\" : \"uploading\", \"received\" : %d, \"size\" : %d, \"speed\" : %d, \"uuid\" : \"%s\"  }", received, length, speed, id);
     }
 
     char *completed_response;
