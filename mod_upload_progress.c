@@ -45,12 +45,12 @@ typedef struct {
 
 typedef struct upload_progress_node_s{
   int done;
-  int length;
-  int received;
+  uint64 length;
+  uint64 received;
   int err_status;
   char *key;
-  int started_at;
-  int speed; /* bytes per second */
+  time_t started_at;
+  uint64 speed; /* bytes per second */
   time_t expires;
   struct upload_progress_node_s* next;
   struct upload_progress_node_s* prev;
