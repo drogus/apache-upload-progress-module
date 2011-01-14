@@ -3,3 +3,5 @@
 *~
 *.slo
 *.la
+.pc
+debian/
