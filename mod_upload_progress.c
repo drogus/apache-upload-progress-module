@@ -231,6 +231,22 @@ void *upload_progress_config_create_server(apr_pool_t *p, server_rec *s) {
         return config;
 }
 
+int read_request_status(request_rec *r)
+{
+    int status;
+
+    if (r) {
+        /* error status rendered in status line is preferred because passenger
+           clobbers request_rec->status when exception occurs */
+        status = r->status_line ? atoi(r->status_line) : 0;
+        if (!ap_is_HTTP_VALID_RESPONSE(status))
+            status = r->status;
+        return status;
+    } else {
+        return 0;
+    }
+}
+
 static int track_upload_progress(ap_filter_t *f, apr_bucket_brigade *bb,
                            ap_input_mode_t mode, apr_read_type_e block,
                            apr_off_t readbytes)
@@ -239,31 +255,31 @@ static int track_upload_progress(ap_filter_t *f, apr_bucket_brigade *bb,
     upload_progress_node_t *node;
     ServerConfig* config = get_server_config(f->r);
 
-    if ((rv = ap_get_brigade(f->next, bb, mode, block,
-                                 readbytes)) != APR_SUCCESS) {
-      return rv;
-    }
+    rv = ap_get_brigade(f->next, bb, mode, block, readbytes);
 
-    apr_off_t length;
-    apr_brigade_length(bb, 1, &length);
     const char* id = get_progress_id(f->r);
     if (id == NULL)
-        return APR_SUCCESS;
+        return rv;
 
     CACHE_LOCK();
     node = find_node(f->r, id);
     if (node != NULL) {
-      node->received += (int)length;
-      if (node->received > node->length) /* handle chunked tranfer */
-        node->length = node->received;
-      int upload_time = time(NULL) - node->started_at;
-      if (upload_time > 0) {
-        node->speed = (int)(node->received / upload_time);
-      }
+        if (rv == APR_SUCCESS) {
+            apr_off_t length;
+            apr_brigade_length(bb, 1, &length);
+            node->received += (int)length;
+            if (node->received > node->length) /* handle chunked tranfer */
+                node->length = node->received;
+            int upload_time = time(NULL) - node->started_at;
+            if (upload_time > 0) {
+                node->speed = (int)(node->received / upload_time);
+            }
+        }
+        node->err_status = read_request_status(f->r);
     }
     CACHE_UNLOCK();
     
-    return APR_SUCCESS;
+    return rv;
 }
 
 const char *get_progress_id(request_rec *r) {
@@ -478,10 +494,10 @@ static apr_status_t upload_progress_cleanup(void *data)
 {
     /* FIXME: this function should use locking because it modifies node data */
     upload_progress_context_t *ctx = (upload_progress_context_t *)data;
+
     if (ctx->node) {
-	if(ctx->r->status >= HTTP_BAD_REQUEST) 
-	    ctx->node->err_status = ctx->r->status;
-        ctx->node->expires = time(NULL) + 60; /*expires in 60s */
+        ctx->node->err_status = read_request_status(ctx->r);
+        ctx->node->expires = time(NULL) + 60; /* expires in 60s */
         ctx->node->done = 1;
     }
     return APR_SUCCESS;
