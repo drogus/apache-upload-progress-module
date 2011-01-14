@@ -1,4 +1,5 @@
 .libs
+*.o
 *.lo
 *~
 *.slo
