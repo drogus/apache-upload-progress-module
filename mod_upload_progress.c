@@ -284,12 +284,12 @@ static int track_upload_progress(ap_filter_t *f, apr_bucket_brigade *bb,
         if (rv == APR_SUCCESS) {
             apr_off_t length;
             apr_brigade_length(bb, 1, &length);
-            node->received += (int)length;
+            node->received += (apr_size_t)length;
             if (node->received > node->length) /* handle chunked tranfer */
                 node->length = node->received;
-            int upload_time = time(NULL) - node->started_at;
+            time_t upload_time = time(NULL) - node->started_at;
             if (upload_time > 0) {
-                node->speed = (int)(node->received / upload_time);
+                node->speed = (apr_size_t)(node->received / upload_time);
             }
         }
         node->err_status = read_request_status(f->r);
@@ -783,7 +783,9 @@ static int reportuploads_handler(request_rec *r)
 { 
 /**/ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, r->server, "reportuploads_handler()");
 
-    int length, received, done, speed, err_status, found=0, started_at=0;
+    apr_size_t length, received, speed;
+    time_t started_at=0;
+    int done=0, err_status, found=0;
     char *response;
     DirConfig* dir = (DirConfig*)ap_get_module_config(r->per_dir_config, &upload_progress_module);
 
@@ -837,14 +839,13 @@ static int reportuploads_handler(request_rec *r)
     apr_table_set(r->headers_out, "Expires", "Mon, 28 Sep 1970 06:00:00 GMT");
     apr_table_set(r->headers_out, "Cache-Control", "no-cache");
 
-/*
- There are 4 possibilities
-   * request not yet started: found = false
-   * request in error:        err_status >= NGX_HTTP_SPECIAL_RESPONSE
-   * request finished:        done = true
-   * request not yet started but registered:        length==0 && rest ==0
-   * reauest in progress:     rest > 0 
- */
+    /* There are 4 possibilities
+     * request not yet started: found = false
+     * request in error:        err_status >= NGX_HTTP_SPECIAL_RESPONSE
+     * request finished:        done = true
+     * request not yet started but registered:        length==0 && rest ==0
+     * reauest in progress:     rest > 0
+     */
 
     if (!found) {
         response = apr_psprintf(r->pool, "{ \"state\" : \"starting\", \"uuid\" : \"%s\" }", id);
