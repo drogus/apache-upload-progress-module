@@ -14,8 +14,8 @@
 #include <unistd.h>
 #endif
 
-#define PROGRESS_ID "upload_id"
-#define PROGRESS_ID_LEN 9
+#define PROGRESS_ID "X-Progress-ID"
+#define PROGRESS_ID_LEN 14
 
 #define CACHE_LOCK() do {                                  \
     if (config->cache_lock) {                              \
