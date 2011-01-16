@@ -15,8 +15,8 @@
 #include <unistd.h>
 #endif
 
-#define PROGRESS_ID "upload_id"
-#define PROGRESS_ID_LEN 9
+#define PROGRESS_ID "X-Progress-ID"
+#define PROGRESS_ID_LEN strlen(PROGRESS_ID)
 
 #define CACHE_LOCK() do {                                  \
     if (config->cache_lock) {                              \
@@ -315,7 +315,7 @@ const char *get_progress_id(request_rec *r) {
             p = r->args;
             do {
                 int len = strlen(p);
-                if (len >= PROGRESS_ID_LEN && strncasecmp(p, PROGRESS_ID, PROGRESS_ID_LEN) == 0) {
+                if ((len >= PROGRESS_ID_LEN + strlen("=")) && strncasecmp(p, PROGRESS_ID "=", PROGRESS_ID_LEN + strlen("=") ) == 0) {
                     i = 1;
                     break;
                 }
@@ -326,7 +326,7 @@ const char *get_progress_id(request_rec *r) {
 
             if (i) {
                 i = 0;
-                start_p = p += PROGRESS_ID_LEN;
+                start_p = p += PROGRESS_ID_LEN + strlen("=");
                 end_p = r->args + strlen(r->args);
                 while (p <= end_p && *p++ != '&') {
                     i++;
