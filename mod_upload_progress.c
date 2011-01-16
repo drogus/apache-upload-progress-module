@@ -852,7 +852,7 @@ static int reportuploads_handler(request_rec *r)
     } else if (err_status >= HTTP_BAD_REQUEST  ) {
         response = apr_psprintf(r->pool, "{ \"state\" : \"error\", \"status\" : %d, \"uuid\" : \"%s\" }", err_status, id);
     } else if (done) {
-        response = apr_psprintf(r->pool, "{ \"state\" : \"done\", \"uuid\" : \"%s\" }", id);
+        response = apr_psprintf(r->pool, "{ \"state\" : \"done\", \"size\" : %d, \"speed\" : %d, \"started_at\": %d, \"uuid\" : \"%s\" }", length, speed, started_at, id);
     } else if ( length == 0 && received == 0 ) {
         response = apr_psprintf(r->pool, "{ \"state\" : \"starting\", \"uuid\" : \"%s\" }", id);
     } else {
