@@ -69,7 +69,6 @@ typedef struct {
 
 typedef struct {
     server_rec *server;
-    apr_rmm_off_t cache_offset;
     apr_pool_t *pool;
     apr_global_mutex_t *cache_lock;
     char *lock_file;           /* filename for shm lock mutex */
@@ -667,7 +666,6 @@ apr_status_t upload_progress_cache_init(apr_pool_t *pool, ServerConfig *config)
         return 0;
     }
     cache->head = NULL;
-    config->cache_offset = block;
     config->cache = cache;
 #endif
 
@@ -756,7 +754,6 @@ int upload_progress_init(apr_pool_t *p, apr_pool_t *plog,
             st_vhost->cache_shm = config->cache_shm;
             st_vhost->cache_rmm = config->cache_rmm;
             st_vhost->cache_file = config->cache_file;
-            st_vhost->cache_offset = config->cache_offset;
             st_vhost->cache = config->cache;
             ap_log_error(APLOG_MARK, APLOG_DEBUG, result, s,
                          "Upload Progress: merging Shared Cache conf: shm=0x%pp rmm=0x%pp "
