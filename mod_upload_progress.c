@@ -18,6 +18,9 @@
 #ifndef PROGRESS_ID
 #  define PROGRESS_ID "X-Progress-ID"
 #endif
+#ifndef JSON_CB_PARAM
+#  define JSON_CB_PARAM "callback"
+#endif
 #ifndef CACHE_FILENAME
 #  define CACHE_FILENAME "/tmp/upload_progress_cache"
 #endif
@@ -355,7 +358,7 @@ const char *get_json_callback_param(request_rec *r) {
 
 /*  ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, r->server, "get_json_callback_param()"); */
 
-    val = get_param_value(r->args, PROGRESS_ID, &len);
+    val = get_param_value(r->args, JSON_CB_PARAM, &len);
     if (val) {
         return apr_pstrndup(r->connection->pool, val, len);
     } else {
