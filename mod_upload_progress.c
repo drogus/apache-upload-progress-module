@@ -17,10 +17,18 @@
 
 #define PROGRESS_ID "X-Progress-ID"
 
+#define DEBUG_LOCKING 0
+
+#if DEBUG_LOCKING == 1
+#  define LOCKDBG(expr) expr
+#else
+#  define LOCKDBG(expr)
+#endif
+
 #define CACHE_LOCK() do {                                  \
     if (config->cache_lock) {                              \
         char errbuf[200];                                  \
-        ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, config->server, "CACHE_LOCK()"); \
+        LOCKDBG(ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, config->server, "CACHE_LOCK()")); \
         apr_status_t status = apr_global_mutex_lock(config->cache_lock);        \
         if (status != APR_SUCCESS) {                          \
             ap_log_error(APLOG_MARK, APLOG_CRIT, status, 0, \
@@ -32,7 +40,7 @@
 #define CACHE_UNLOCK() do {                                \
     if (config->cache_lock)                               \
     {	\
-        ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, config->server, "CACHE_UNLOCK()"); \
+        LOCKDBG(ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, config->server, "CACHE_UNLOCK()")); \
         apr_global_mutex_unlock(config->cache_lock);      \
     }	\
 } while (0)
