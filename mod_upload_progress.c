@@ -15,12 +15,15 @@
 #include <unistd.h>
 #endif
 
-#define PROGRESS_ID "X-Progress-ID"
+#ifndef PROGRESS_ID
+#  define PROGRESS_ID "X-Progress-ID"
+#endif
 #ifndef CACHE_FILENAME
 #  define CACHE_FILENAME "/tmp/upload_progress_cache"
 #endif
-
-#define DEBUG_LOCKING 0
+#ifndef DEBUG_LOCKING
+#  define DEBUG_LOCKING 0
+#endif
 
 #if DEBUG_LOCKING == 1
 #  define LOCKDBG(expr) expr
