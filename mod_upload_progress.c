@@ -149,7 +149,7 @@ static void upload_progress_register_hooks (apr_pool_t *p)
 }
 
 ServerConfig *get_server_config(request_rec *r) {
-/**/ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, r->server, "get_server_config()");
+/*  ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, r->server, "get_server_config()"); */
     return (ServerConfig*)ap_get_module_config(r->server->module_config, &upload_progress_module);
 }
 
@@ -243,7 +243,7 @@ void * upload_progress_config_create_dir(apr_pool_t *p, char *dirspec) {
 }
 
 void *upload_progress_config_create_server(apr_pool_t *p, server_rec *s) {
-/**/ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, s, "upload_progress_config_create_server()");
+/*  ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, s, "upload_progress_config_create_server()"); */
     ServerConfig *config = (ServerConfig *)apr_pcalloc(p, sizeof(ServerConfig));
     config->cache_file = apr_pstrdup(p, "/tmp/upload_progress_cache");
     config->cache_bytes = 51200;
@@ -254,7 +254,7 @@ void *upload_progress_config_create_server(apr_pool_t *p, server_rec *s) {
 
 int read_request_status(request_rec *r)
 {
-/**/ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, r->server, "read_request_status()");
+/*  ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, r->server, "read_request_status()"); */
     int status;
 
     if (r) {
@@ -328,7 +328,7 @@ const char *get_progress_id(request_rec *r) {
     char *val;
     int len;
 
-/**/ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, r->server, "get_progress_id()");
+/*  ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, r->server, "get_progress_id()"); */
 
     //try to find progress id in headers
     const char *id  = apr_table_get(r->headers_in, PROGRESS_ID);
@@ -347,7 +347,7 @@ const char *get_json_callback_param(request_rec *r) {
     char *val;
     int len;
 
-/**/ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, r->server, "get_json_callback_param()");
+/*  ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, r->server, "get_json_callback_param()"); */
 
     val = get_param_value(r->args, PROGRESS_ID, &len);
     if (val) {
