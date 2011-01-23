@@ -298,9 +298,28 @@ static int track_upload_progress(ap_filter_t *f, apr_bucket_brigade *bb,
     return rv;
 }
 
+char *get_param_value(char *p, const char *param_name, int *len) {
+    char pn1[3] = {toupper(param_name[0]), tolower(param_name[0]), 0};
+    int pn_len = strlen(param_name);
+    char *val_end;
+    static char *param_sep = "&";
+
+    while (p) {
+        if ((strncasecmp(p, param_name, pn_len) == 0) && (p[pn_len] == '='))
+            break;
+        if (*p) p++;
+        p = strpbrk(p, pn1);
+    }
+    if (p) {
+        p += (pn_len + 1);
+        *len = strcspn(p, param_sep);
+    }
+    return p;
+}
+
 const char *get_progress_id(request_rec *r) {
-    char *p, *start_p, *end_p;
-    int i;
+    char *val;
+    int len;
 
 /**/ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, r->server, "get_progress_id()");
 
@@ -308,70 +327,27 @@ const char *get_progress_id(request_rec *r) {
     const char *id  = apr_table_get(r->headers_in, PROGRESS_ID);
 
     //if not found check args
-    if(id == NULL) {
-        if (r->args) {
-            i = 0;
-            p = r->args;
-            do {
-                int len = strlen(p);
-                if ((len >= PROGRESS_ID_LEN + strlen("=")) && strncasecmp(p, PROGRESS_ID "=", PROGRESS_ID_LEN + strlen("=") ) == 0) {
-                    i = 1;
-                    break;
-                }
-                if (len<=0)
-                    break;
-                }
-            while(p++);
-
-            if (i) {
-                i = 0;
-                start_p = p += PROGRESS_ID_LEN + strlen("=");
-                end_p = r->args + strlen(r->args);
-                while (p <= end_p && *p++ != '&') {
-                    i++;
-                }
-
-                return apr_pstrndup(r->connection->pool, start_p, p-start_p-1);
-            }
-        }
+    if (id == NULL) {
+        val = get_param_value(r->args, PROGRESS_ID, &len);
+        if (val)
+            id = apr_pstrndup(r->connection->pool, val, len);
     }
 
     return id;
 }
 
 const char *get_json_callback_param(request_rec *r) {
-    char *p, *start_p, *end_p;
-    int i;
-    const char *callback = NULL;
+    char *val;
+    int len;
 
 /**/ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, r->server, "get_json_callback_param()");
 
-    if (r->args) {
-        i = 0;
-        p = r->args;
-        do {
-            int len = strlen(p);
-            if (len >= 9 && strncasecmp(p, "callback=", 9) == 0) {
-                i = 1;
-                break;
-            }
-            if (len<=0)
-                break;
-        }
-        while(p++);
-
-        if (i) {
-            i = 0;
-            start_p = p += 9;
-            end_p = r->args + strlen(r->args);
-            while (p <= end_p && *p++ != '&') {
-                i++;
-            }
-            return apr_pstrndup(r->connection->pool, start_p, p-start_p-1);
-        }
+    val = get_param_value(r->args, PROGRESS_ID, &len);
+    if (val) {
+        return apr_pstrndup(r->connection->pool, val, len);
+    } else {
+        return NULL;
     }
-
-    return callback;
 }
 
 void cache_free(ServerConfig *config, const void *ptr)
