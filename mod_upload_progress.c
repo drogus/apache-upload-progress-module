@@ -16,7 +16,6 @@
 #endif
 
 #define PROGRESS_ID "X-Progress-ID"
-#define PROGRESS_ID_LEN strlen(PROGRESS_ID)
 
 #define CACHE_LOCK() do {                                  \
     if (config->cache_lock) {                              \
