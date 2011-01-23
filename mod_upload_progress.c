@@ -780,12 +780,12 @@ static int reportuploads_handler(request_rec *r)
     const char *id = get_progress_id(r);
 
     if (id == NULL) {
-    ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, r->server,
-                 "Upload Progress: Not found id in location with reports enabled. uri=%s", id, r->uri);
+        ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, r->server,
+                     "Upload Progress: Request without id in location with reports enabled. uri=%s", id, r->uri);
         return HTTP_NOT_FOUND;
     } else {
         ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, r->server,
-                     "Upload Progress: Found id=%s in location with reports enables. uri=%s", id, r->uri);
+                     "Upload Progress: Request with id=%s in location with reports enabled. uri=%s", id, r->uri);
     }
 
     ServerConfig *config = (ServerConfig*)ap_get_module_config(r->server->module_config, &upload_progress_module);
