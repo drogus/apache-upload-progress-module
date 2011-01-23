@@ -16,6 +16,9 @@
 #endif
 
 #define PROGRESS_ID "X-Progress-ID"
+#ifndef CACHE_FILENAME
+#  define CACHE_FILENAME "/tmp/upload_progress_cache"
+#endif
 
 #define DEBUG_LOCKING 0
 
@@ -245,7 +248,7 @@ void * upload_progress_config_create_dir(apr_pool_t *p, char *dirspec) {
 void *upload_progress_config_create_server(apr_pool_t *p, server_rec *s) {
 /*  ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, s, "upload_progress_config_create_server()"); */
     ServerConfig *config = (ServerConfig *)apr_pcalloc(p, sizeof(ServerConfig));
-    config->cache_file = apr_pstrdup(p, "/tmp/upload_progress_cache");
+    config->cache_file = apr_pstrdup(p, CACHE_FILENAME);
     config->cache_bytes = 51200;
     apr_pool_create(&config->pool, p);
     config->server = s;
