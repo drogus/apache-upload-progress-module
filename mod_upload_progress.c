@@ -672,12 +672,6 @@ static int reportuploads_handler(request_rec *r)
 
     ServerConfig *config = (ServerConfig*)ap_get_module_config(r->server->module_config, &upload_progress_module);
 
-    if (config->cache_rmm == NULL) {
-        ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, r->server,
-                     "Upload Progress: Cache error while generating report");
-        return HTTP_INTERNAL_SERVER_ERROR ;
-    }
-
     CACHE_LOCK();
     upload_progress_node_t *node = find_node(r, id);
     if (node != NULL) {
