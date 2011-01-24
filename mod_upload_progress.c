@@ -27,6 +27,10 @@
 #ifndef DEBUG_LOCKING
 #  define DEBUG_LOCKING 0
 #endif
+#define PROGRESS_KEY_TEMPLATE "12345678-0000-0000-0000-123456789012"
+#ifndef PROGRESS_KEY_LEN
+#  define PROGRESS_KEY_LEN strlen(PROGRESS_KEY_TEMPLATE)
+#endif
 
 #if DEBUG_LOCKING == 1
 #  define LOCKDBG(expr) expr
@@ -61,16 +65,16 @@ typedef struct {
 
 
 typedef struct upload_progress_node_s{
-    int done;
     apr_size_t length;
     apr_size_t received;
     int err_status;
-    char *key;
     time_t started_at;
     apr_size_t speed; /* bytes per second */
     time_t expires;
     struct upload_progress_node_s* next;
     struct upload_progress_node_s* prev;
+    int done;
+    char key[PROGRESS_KEY_LEN];
 }upload_progress_node_t;
 
 typedef struct {
@@ -346,6 +350,7 @@ const char *get_progress_id(request_rec *r) {
     if (id == NULL) {
         val = get_param_value(r->args, PROGRESS_ID, &len);
         if (val)
+            if (len > PROGRESS_KEY_LEN) len = PROGRESS_KEY_LEN;
             id = apr_pstrndup(r->connection->pool, val, len);
     }
 
@@ -380,15 +385,9 @@ void cache_free(ServerConfig *config, const void *ptr)
     }
 }
 
-char *fetch_key(ServerConfig *config, char *key) {
-/**/ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, global_server, "fetch_key()");
-    return (char *)apr_rmm_addr_get(config->cache_rmm, apr_rmm_offset_get(config->cache_rmm, key));
-}
-
 int check_node(ServerConfig *config, upload_progress_node_t *node, const char *key) {
 /**/ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, global_server, "check_node()");
-    char *node_key = fetch_key(config, node->key);
-    return strcasecmp(node_key, key) == 0 ? 1 : 0;
+    return strncasecmp(node->key, key, PROGRESS_KEY_LEN) == 0 ? 1 : 0;
 }
 
 upload_progress_node_t *fetch_node(ServerConfig *config, upload_progress_node_t *node) {
@@ -440,19 +439,8 @@ upload_progress_node_t *store_node(ServerConfig *config, const char *key) {
 /**/ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, global_server, "store_node()");
 
     node = block ? (upload_progress_node_t *)apr_rmm_addr_get(config->cache_rmm, block) : NULL;
-    if (node == NULL) {
-        return NULL;
-    }
-    node->next = NULL;
-
-    block = apr_rmm_calloc(config->cache_rmm, strlen(key)+1);
-    node->key = block ? (char *)apr_rmm_addr_get(config->cache_rmm, block) : NULL;
-    if (node->key != NULL) {
-        sprintf(node->key, "%s\0", key);
-    } else {
-        apr_rmm_free(config->cache_rmm, apr_rmm_offset_get(config->cache_rmm, (void *)node));
-        node = NULL;
-    }
+    if (node)
+        strncpy(node->key, key, PROGRESS_KEY_LEN);
 
     return node;
 }
@@ -560,12 +548,10 @@ static void clean_old_connections(request_rec *r) {
                 /* head */
                 upload_progress_cache_t *cache = fetch_cache(config);
                 cache->head = fetch_node(config, node->next);
-                cache_free(config, node->key);
                 cache_free(config, node);
                 node = cache->head;
             } else {
                 prev->next = node->next;
-                cache_free(config, node->key);
                 cache_free(config, node);
                 node = prev;
             }
