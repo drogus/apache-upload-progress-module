@@ -862,8 +862,10 @@ static void upload_progress_child_init(apr_pool_t *p, server_rec *s)
     apr_status_t sts;
     ServerConfig *st = (ServerConfig *)ap_get_module_config(s->module_config, &upload_progress_module);
 
-    if (!st->cache_lock)
+    if (!st->cache_lock) {
+        ap_log_error(APLOG_MARK, APLOG_CRIT, 0, s, "Global mutex not set.");
         return;
+    }
 
     sts = apr_global_mutex_child_init(&st->cache_lock, st->lock_file, p);
     if (sts != APR_SUCCESS) {
