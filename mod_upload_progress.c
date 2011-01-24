@@ -584,22 +584,6 @@ static apr_status_t upload_progress_cache_module_kill(void *data)
 {
 /**/ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, global_server, "upload_progress_cache_module_kill()");
 
-    ServerConfig *st = (ServerConfig*)data;
-
-    upload_progress_destroy_cache(st);
-
-#if APR_HAS_SHARED_MEMORY
-    //FIXME!: Second block of code gets never executed!
-    if (st->cache_rmm != NULL) {
-        apr_rmm_destroy (st->cache_rmm);
-        st->cache_rmm = NULL;
-    }
-    if (st->cache_shm != NULL) {
-        apr_status_t result = apr_shm_destroy(st->cache_shm);
-        st->cache_shm = NULL;
-        return result;
-    }
-#endif
     return APR_SUCCESS;
 }
 
