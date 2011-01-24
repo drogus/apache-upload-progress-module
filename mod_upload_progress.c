@@ -739,6 +739,7 @@ int upload_progress_init(apr_pool_t *p, apr_pool_t *plog,
                          s_vhost->server_hostname);
 #endif
 
+            st_vhost->cache_lock = config->cache_lock;
             st_vhost->lock_file = config->lock_file;
             s_vhost = s_vhost->next;
         }
@@ -860,8 +861,6 @@ static void upload_progress_child_init(apr_pool_t *p, server_rec *s)
 
     apr_status_t sts;
     ServerConfig *st = (ServerConfig *)ap_get_module_config(s->module_config, &upload_progress_module);
-    server_rec *s_vhost;
-    ServerConfig *st_vhost;
 
     if (!st->cache_lock)
         return;
@@ -872,12 +871,5 @@ static void upload_progress_child_init(apr_pool_t *p, server_rec *s)
                      "Failed to initialise global mutex %s in child process %"
                      APR_PID_T_FMT ".",
                      st->lock_file, getpid());
-    }
-
-    s_vhost = s->next;
-    while (s_vhost) {
-        st_vhost = (ServerConfig *)ap_get_module_config(s_vhost->module_config, &upload_progress_module);
-        st_vhost->cache_lock = st->cache_lock;
-        s_vhost = s_vhost->next;
     }
 }
