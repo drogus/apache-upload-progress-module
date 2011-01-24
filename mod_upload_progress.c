@@ -9,6 +9,8 @@
 #if APR_HAS_SHARED_MEMORY
 #include "apr_rmm.h"
 #include "apr_shm.h"
+#else
+#error "APR_HAS_SHARED_MEMORY required for upload_progress module"
 #endif
 
 #if APR_HAVE_UNISTD_H
@@ -94,11 +96,8 @@ typedef struct {
     apr_global_mutex_t *cache_lock;
     char *lock_file;           /* filename for shm lock mutex */
     apr_size_t cache_bytes;
-
-#if APR_HAS_SHARED_MEMORY
     apr_shm_t *cache_shm;
     apr_rmm_t *cache_rmm;
-#endif
     char *cache_file;
     upload_progress_cache_t *cache;
 } ServerConfig;
@@ -480,7 +479,6 @@ apr_status_t upload_progress_cache_init(apr_pool_t *pool, ServerConfig *config)
 {
 /**/up_log(APLOG_MARK, APLOG_DEBUG, 0, global_server, "upload_progress_cache_init()");
 
-#if APR_HAS_SHARED_MEMORY
     apr_status_t result;
     apr_size_t size;
     upload_progress_cache_t *cache;
@@ -531,7 +529,6 @@ apr_status_t upload_progress_cache_init(apr_pool_t *pool, ServerConfig *config)
 
     ap_log_error(APLOG_MARK, APLOG_INFO, 0, global_server,
                  "Upload Progress: monitoring %i simultaneous uploads", nodes_cnt);
-#endif
 
     return APR_SUCCESS;
 }
@@ -559,7 +556,6 @@ int upload_progress_init(apr_pool_t *p, apr_pool_t *plog,
         apr_pool_userdata_set((const void *)1, userdata_key,
                                apr_pool_cleanup_null, s->process->pool);
 
-    #if APR_HAS_SHARED_MEMORY
         /* If the cache file already exists then delete it.  Otherwise we are
          * going to run into problems creating the shared memory. */
         if (config->cache_file) {
@@ -567,16 +563,13 @@ int upload_progress_init(apr_pool_t *p, apr_pool_t *plog,
                                          NULL);
             apr_file_remove(lck_file, ptemp);
         }
-    #endif
         return OK;
     }
 
-#if APR_HAS_SHARED_MEMORY
     /* initializing cache if shared memory size is not zero and we already
      * don't have shm address
      */
     if (!config->cache_shm && config->cache_bytes > 0) {
-#endif
         result = upload_progress_cache_init(p, config);
         if (result != APR_SUCCESS) {
             ap_log_error(APLOG_MARK, APLOG_ERR, result, s,
@@ -584,12 +577,10 @@ int upload_progress_init(apr_pool_t *p, apr_pool_t *plog,
             return DONE;
         }
 
-#if APR_HAS_SHARED_MEMORY
         if (config->cache_file) {
             config->lock_file = apr_pstrcat(config->pool, config->cache_file, ".lck",
                                         NULL);
         }
-#endif
 
         result = apr_global_mutex_create(&config->cache_lock,
                                          config->lock_file, APR_LOCK_DEFAULT,
@@ -614,7 +605,6 @@ int upload_progress_init(apr_pool_t *p, apr_pool_t *plog,
                        ap_get_module_config(s_vhost->module_config,
                                             &upload_progress_module);
 
-#if APR_HAS_SHARED_MEMORY
             st_vhost->cache_shm = config->cache_shm;
             st_vhost->cache_rmm = config->cache_rmm;
             st_vhost->cache_file = config->cache_file;
@@ -623,20 +613,17 @@ int upload_progress_init(apr_pool_t *p, apr_pool_t *plog,
                          "Upload Progress: merging Shared Cache conf: shm=0x%pp rmm=0x%pp "
                          "for VHOST: %s", config->cache_shm, config->cache_rmm,
                          s_vhost->server_hostname);
-#endif
 
             st_vhost->cache_lock = config->cache_lock;
             st_vhost->lock_file = config->lock_file;
             s_vhost = s_vhost->next;
         }
 
-#if APR_HAS_SHARED_MEMORY
     } else {
         ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, s,
                      "Upload Progress cache: cache size is zero, disabling "
                      "shared memory cache");
     }
-#endif
 
     return(OK);
 }
