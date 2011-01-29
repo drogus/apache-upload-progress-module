@@ -10,14 +10,36 @@
 #if APR_HAS_SHARED_MEMORY
 #include "apr_rmm.h"
 #include "apr_shm.h"
+#else
+#error "APR_HAS_SHARED_MEMORY required for upload_progress module"
 #endif
 
 #if APR_HAVE_UNISTD_H
 #include <unistd.h>
 #endif
 
-#define PROGRESS_ID "X-Progress-ID"
-#define PROGRESS_ID_LEN strlen(PROGRESS_ID)
+#ifndef PROGRESS_ID
+#  define PROGRESS_ID "X-Progress-ID"
+#endif
+#ifndef JSON_CB_PARAM
+#  define JSON_CB_PARAM "callback"
+#endif
+#ifndef CACHE_FILENAME
+#  define CACHE_FILENAME "/tmp/upload_progress_cache"
+#endif
+#ifndef UP_DEBUG
+#  define UP_DEBUG 0
+#endif
+#define PROGRESS_KEY_TEMPLATE "12345678-0000-0000-0000-123456789012"
+#ifndef PROGRESS_KEY_LEN
+#  define PROGRESS_KEY_LEN strlen(PROGRESS_KEY_TEMPLATE)
+#endif
+
+#if UP_DEBUG == 1
+#  define up_log(...) ap_log_error( __VA_ARGS__ )
+#else
+#  define up_log(...)
+#endif
 
 #if APR_HAS_SHARED_MEMORY
 /*
@@ -125,7 +147,7 @@ shm_remove_failed:
 #define CACHE_LOCK() do {                                  \
     if (config->cache_lock) {                              \
         char errbuf[200];                                  \
-        ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, config->server, "CACHE_LOCK()"); \
+        up_log(APLOG_MARK, APLOG_DEBUG, 0, config->server, "CACHE_LOCK()"); \
         apr_status_t status = apr_global_mutex_lock(config->cache_lock);        \
         if (status != APR_SUCCESS) {                          \
             ap_log_error(APLOG_MARK, APLOG_CRIT, status, 0, \
@@ -137,7 +159,7 @@ shm_remove_failed:
 #define CACHE_UNLOCK() do {                                \
     if (config->cache_lock)                               \
     {	\
-        ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, config->server, "CACHE_UNLOCK()"); \
+        up_log(APLOG_MARK, APLOG_DEBUG, 0, config->server, "CACHE_UNLOCK()"); \
         apr_global_mutex_unlock(config->cache_lock);      \
     }	\
 } while (0)
@@ -149,20 +171,21 @@ typedef struct {
 
 
 typedef struct upload_progress_node_s{
-    int done;
     apr_size_t length;
     apr_size_t received;
     int err_status;
-    char *key;
     time_t started_at;
     apr_size_t speed; /* bytes per second */
     time_t expires;
-    struct upload_progress_node_s* next;
-    struct upload_progress_node_s* prev;
+    int done;
+    char key[PROGRESS_KEY_LEN];
 }upload_progress_node_t;
 
 typedef struct {
-    upload_progress_node_t *head; /* keep head of the list */
+    int count;
+    int active;
+    upload_progress_node_t *nodes; /* all nodes allocated at once */
+    int *list; /* static array of node indexes, list begins with indexes of active nodes */
 }upload_progress_cache_t;
 
 typedef struct {
@@ -173,16 +196,12 @@ typedef struct {
 
 typedef struct {
     server_rec *server;
-    apr_rmm_off_t cache_offset;
     apr_pool_t *pool;
     apr_global_mutex_t *cache_lock;
     char *lock_file;           /* filename for shm lock mutex */
     apr_size_t cache_bytes;
-
-#if APR_HAS_SHARED_MEMORY
     apr_shm_t *cache_shm;
     apr_rmm_t *cache_rmm;
-#endif
     char *cache_file;
     upload_progress_cache_t *cache;
 } ServerConfig;
@@ -237,7 +256,7 @@ module AP_MODULE_DECLARE_DATA upload_progress_module =
 
 static void upload_progress_register_hooks (apr_pool_t *p)
 {
-/**/ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, global_server, "upload_progress_register_hooks()");
+/**/up_log(APLOG_MARK, APLOG_DEBUG, 0, global_server, "upload_progress_register_hooks()");
 
     ap_hook_fixups(upload_progress_handle_request, NULL, NULL, APR_HOOK_FIRST);
     ap_hook_handler(reportuploads_handler, NULL, NULL, APR_HOOK_FIRST);
@@ -246,17 +265,16 @@ static void upload_progress_register_hooks (apr_pool_t *p)
     ap_register_input_filter("UPLOAD_PROGRESS", track_upload_progress, NULL, AP_FTYPE_RESOURCE);
 }
 
-ServerConfig *get_server_config(request_rec *r) {
-/**/ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, r->server, "get_server_config()");
-    return (ServerConfig*)ap_get_module_config(r->server->module_config, &upload_progress_module);
+inline ServerConfig *get_server_config(server_rec *s) {
+    return (ServerConfig*)ap_get_module_config(s->module_config, &upload_progress_module);
 }
 
 static int upload_progress_handle_request(request_rec *r)
 {
-/**/ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, r->server, "upload_progress_handle_request()");
+/**/up_log(APLOG_MARK, APLOG_DEBUG, 0, r->server, "upload_progress_handle_request()");
 
     DirConfig* dir = (DirConfig*)ap_get_module_config(r->per_dir_config, &upload_progress_module);
-    ServerConfig *config = get_server_config(r);
+    ServerConfig *config = get_server_config(r->server);
 
     if (dir->track_enabled) {
         if (r->method_number == M_POST) {
@@ -266,7 +284,7 @@ static int upload_progress_handle_request(request_rec *r)
             const char* id = get_progress_id(r);
 
             if (id != NULL) {
-                ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, r->server,
+                up_log(APLOG_MARK, APLOG_DEBUG, 0, r->server,
                              "Upload Progress: Progress id found: %s.", id);
 
                 CACHE_LOCK();
@@ -275,11 +293,11 @@ static int upload_progress_handle_request(request_rec *r)
                 if (node == NULL) {
                     node = insert_node(r, id);
                     if (node)
-                        ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, r->server,
+                        up_log(APLOG_MARK, APLOG_DEBUG, 0, r->server,
                                      "Upload Progress: Added upload with id=%s to list.", id);
                 } else if (node->done) {
                     fill_new_upload_node_data(node, r);
-                    ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, r->server,
+                    up_log(APLOG_MARK, APLOG_DEBUG, 0, r->server,
                                  "Upload Progress: Reused existing node with id '%s'.", id);
                 } else {
                     node = NULL;
@@ -302,7 +320,7 @@ static int upload_progress_handle_request(request_rec *r)
 
 static const char *report_upload_progress_cmd(cmd_parms *cmd, void *config, int arg)
 {
-/**/ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, global_server, "report_upload_progress_cmd()");
+/**/up_log(APLOG_MARK, APLOG_DEBUG, 0, global_server, "report_upload_progress_cmd()");
     DirConfig* dir = (DirConfig*)config ;
     dir->report_enabled = arg;
     return NULL;
@@ -310,7 +328,7 @@ static const char *report_upload_progress_cmd(cmd_parms *cmd, void *config, int 
 
 static const char *track_upload_progress_cmd(cmd_parms *cmd, void *config, int arg)
 {
-/**/ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, global_server, "track_upload_progress_cmd()");
+/**/up_log(APLOG_MARK, APLOG_DEBUG, 0, global_server, "track_upload_progress_cmd()");
     DirConfig* dir = (DirConfig*)config ;
     dir->track_enabled = arg;
     return NULL;
@@ -318,8 +336,8 @@ static const char *track_upload_progress_cmd(cmd_parms *cmd, void *config, int a
 
 static const char* upload_progress_shared_memory_size_cmd(cmd_parms *cmd, void *dummy,
                                            const char *arg) {
-/**/ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, global_server, "upload_progress_shared_memory_size_cmd()");
-    ServerConfig *config = (ServerConfig*)ap_get_module_config(cmd->server->module_config, &upload_progress_module);
+/**/up_log(APLOG_MARK, APLOG_DEBUG, 0, global_server, "upload_progress_shared_memory_size_cmd()");
+    ServerConfig *config = get_server_config(cmd->server);
 
     long long int n = atoi(arg);
 
@@ -333,7 +351,7 @@ static const char* upload_progress_shared_memory_size_cmd(cmd_parms *cmd, void *
 }
 
 void * upload_progress_config_create_dir(apr_pool_t *p, char *dirspec) {
-/**/ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, global_server, "upload_progress_config_create_dir()");
+/**/up_log(APLOG_MARK, APLOG_DEBUG, 0, global_server, "upload_progress_config_create_dir()");
     DirConfig* dir = (DirConfig*)apr_pcalloc(p, sizeof(DirConfig));
     dir->report_enabled = 0;
     dir->track_enabled = 0;
@@ -341,9 +359,9 @@ void * upload_progress_config_create_dir(apr_pool_t *p, char *dirspec) {
 }
 
 void *upload_progress_config_create_server(apr_pool_t *p, server_rec *s) {
-/**/ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, s, "upload_progress_config_create_server()");
+    up_log(APLOG_MARK, APLOG_DEBUG, 0, s, "upload_progress_config_create_server()");
     ServerConfig *config = (ServerConfig *)apr_pcalloc(p, sizeof(ServerConfig));
-    config->cache_file = apr_pstrdup(p, "/tmp/upload_progress_cache");
+    config->cache_file = apr_pstrdup(p, CACHE_FILENAME);
     config->cache_bytes = 51200;
     apr_pool_create(&config->pool, p);
     config->server = s;
@@ -352,7 +370,6 @@ void *upload_progress_config_create_server(apr_pool_t *p, server_rec *s) {
 
 int read_request_status(request_rec *r)
 {
-/**/ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, r->server, "read_request_status()");
     int status;
 
     if (r) {
@@ -371,10 +388,10 @@ static int track_upload_progress(ap_filter_t *f, apr_bucket_brigade *bb,
                            ap_input_mode_t mode, apr_read_type_e block,
                            apr_off_t readbytes)
 {
-/**/ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, global_server, "track_upload_progress()");
+/**/up_log(APLOG_MARK, APLOG_DEBUG, 0, global_server, "track_upload_progress()");
     apr_status_t rv;
     upload_progress_node_t *node;
-    ServerConfig* config = get_server_config(f->r);
+    ServerConfig* config = get_server_config(f->r->server);
 
     rv = ap_get_brigade(f->next, bb, mode, block, readbytes);
 
@@ -403,177 +420,61 @@ static int track_upload_progress(ap_filter_t *f, apr_bucket_brigade *bb,
     return rv;
 }
 
-const char *get_progress_id(request_rec *r) {
-    char *p, *start_p, *end_p;
-    int i;
+char *get_param_value(char *p, const char *param_name, int *len) {
+    char pn1[3] = {toupper(param_name[0]), tolower(param_name[0]), 0};
+    int pn_len = strlen(param_name);
+    char *val_end;
+    static char *param_sep = "&";
 
-/**/ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, r->server, "get_progress_id()");
+    while (p) {
+        if ((strncasecmp(p, param_name, pn_len) == 0) && (p[pn_len] == '='))
+            break;
+        if (*p) p++;
+        p = strpbrk(p, pn1);
+    }
+    if (p) {
+        p += (pn_len + 1);
+        *len = strcspn(p, param_sep);
+    }
+    return p;
+}
+
+const char *get_progress_id(request_rec *r) {
+    char *val;
+    int len;
 
     //try to find progress id in headers
     const char *id  = apr_table_get(r->headers_in, PROGRESS_ID);
 
     //if not found check args
-    if(id == NULL) {
-        if (r->args) {
-            i = 0;
-            p = r->args;
-            do {
-                int len = strlen(p);
-                if ((len >= PROGRESS_ID_LEN + strlen("=")) && strncasecmp(p, PROGRESS_ID "=", PROGRESS_ID_LEN + strlen("=") ) == 0) {
-                    i = 1;
-                    break;
-                }
-                if (len<=0)
-                    break;
-                }
-            while(p++);
-
-            if (i) {
-                i = 0;
-                start_p = p += PROGRESS_ID_LEN + strlen("=");
-                end_p = r->args + strlen(r->args);
-                while (p <= end_p && *p++ != '&') {
-                    i++;
-                }
-
-                return apr_pstrndup(r->connection->pool, start_p, p-start_p-1);
-            }
-        }
+    if (id == NULL) {
+        val = get_param_value(r->args, PROGRESS_ID, &len);
+        if (val)
+            if (len > PROGRESS_KEY_LEN) len = PROGRESS_KEY_LEN;
+            id = apr_pstrndup(r->connection->pool, val, len);
     }
 
     return id;
 }
 
 const char *get_json_callback_param(request_rec *r) {
-    char *p, *start_p, *end_p;
-    int i;
-    const char *callback = NULL;
+    char *val;
+    int len;
 
-/**/ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, r->server, "get_json_callback_param()");
-
-    if (r->args) {
-        i = 0;
-        p = r->args;
-        do {
-            int len = strlen(p);
-            if (len >= 9 && strncasecmp(p, "callback=", 9) == 0) {
-                i = 1;
-                break;
-            }
-            if (len<=0)
-                break;
-        }
-        while(p++);
-
-        if (i) {
-            i = 0;
-            start_p = p += 9;
-            end_p = r->args + strlen(r->args);
-            while (p <= end_p && *p++ != '&') {
-                i++;
-            }
-            return apr_pstrndup(r->connection->pool, start_p, p-start_p-1);
-        }
-    }
-
-    return callback;
-}
-
-void cache_free(ServerConfig *config, const void *ptr)
-{
-/**/ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, global_server, "cache_free()");
-    if (config->cache_rmm) {
-        if (ptr)
-            /* Free in shared memory */
-            apr_rmm_free(config->cache_rmm, apr_rmm_offset_get(config->cache_rmm, (void *)ptr));
+    val = get_param_value(r->args, JSON_CB_PARAM, &len);
+    if (val) {
+        return apr_pstrndup(r->connection->pool, val, len);
     } else {
-        if (ptr)
-            /* Cache shm is not used */
-            free((void *)ptr);
-    }
-}
-
-char *fetch_key(ServerConfig *config, char *key) {
-/**/ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, global_server, "fetch_key()");
-    return (char *)apr_rmm_addr_get(config->cache_rmm, apr_rmm_offset_get(config->cache_rmm, key));
-}
-
-int check_node(ServerConfig *config, upload_progress_node_t *node, const char *key) {
-/**/ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, global_server, "check_node()");
-    char *node_key = fetch_key(config, node->key);
-    return strcasecmp(node_key, key) == 0 ? 1 : 0;
-}
-
-upload_progress_node_t *fetch_node(ServerConfig *config, upload_progress_node_t *node) {
-/**/ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, global_server, "fetch_node()");
-    return (upload_progress_node_t *)apr_rmm_addr_get(config->cache_rmm, apr_rmm_offset_get(config->cache_rmm, node));
-}
-
-upload_progress_cache_t *fetch_cache(ServerConfig *config) {
-/**/ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, global_server, "fetch_cache()");
-    return (upload_progress_cache_t *)apr_rmm_addr_get(config->cache_rmm, apr_rmm_offset_get(config->cache_rmm, config->cache));
-}
-
-upload_progress_node_t *fetch_first_node(ServerConfig *config) {
-    upload_progress_cache_t *cache;
-
-/**/ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, global_server, "fetch_first_node()");
-
-    cache = fetch_cache(config);
-    if(cache->head == NULL) {
         return NULL;
     }
-
-    return fetch_node(config, cache->head);
 }
 
-upload_progress_node_t *fetch_last_node(ServerConfig *config) {
-/**/ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, global_server, "fetch_last_node()");
-
-    upload_progress_cache_t *cache;
-    upload_progress_node_t *node;
-
-    cache = fetch_cache(config);
-    if(cache->head == NULL) {
-        return NULL;
-    }
-
-    node = fetch_node(config, cache->head);
-    while(node->next != NULL) {
-        node = fetch_node(config, node->next);
-    }
-
-    return node;
-}
-
-upload_progress_node_t *store_node(ServerConfig *config, const char *key) {
-    apr_rmm_off_t block = apr_rmm_calloc(config->cache_rmm, sizeof(upload_progress_node_t));
-    upload_progress_node_t *node;
-
-/**/ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, global_server, "store_node()");
-
-    node = block ? (upload_progress_node_t *)apr_rmm_addr_get(config->cache_rmm, block) : NULL;
-    if (node == NULL) {
-        return NULL;
-    }
-    node->next = NULL;
-
-    block = apr_rmm_calloc(config->cache_rmm, strlen(key)+1);
-    node->key = block ? (char *)apr_rmm_addr_get(config->cache_rmm, block) : NULL;
-    if (node->key != NULL) {
-        sprintf(node->key, "%s\0", key);
-    } else {
-        apr_rmm_free(config->cache_rmm, apr_rmm_offset_get(config->cache_rmm, (void *)node));
-        node = NULL;
-    }
-
-    return node;
+inline int check_node(upload_progress_node_t *node, const char *key) {
+    return strncasecmp(node->key, key, PROGRESS_KEY_LEN) == 0 ? 1 : 0;
 }
 
 void fill_new_upload_node_data(upload_progress_node_t *node, request_rec *r) {
     const char *content_length;
-
-/**/ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, r->server, "fill_new_upload_node_data()");
 
     node->received = 0;
     node->done = 0;
@@ -589,63 +490,46 @@ void fill_new_upload_node_data(upload_progress_node_t *node, request_rec *r) {
 }
 
 upload_progress_node_t* insert_node(request_rec *r, const char *key) {
-/**/ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, r->server, "insert_node()");
+/**/up_log(APLOG_MARK, APLOG_DEBUG, 0, r->server, "insert_node()");
 
+    ServerConfig *config = get_server_config(r->server);
+    upload_progress_cache_t *cache = config->cache;
     upload_progress_node_t *node;
-    upload_progress_cache_t *cache;
 
-    ServerConfig *config = (ServerConfig*)ap_get_module_config(r->server->module_config, &upload_progress_module);
-
-    upload_progress_node_t *head = fetch_first_node(config);
-    node = store_node(config, key);
-    if (node == NULL)
+    if (cache->active == cache->count) {
+        ap_log_error(APLOG_MARK, APLOG_NOTICE, 0, r->server, "Cache full");
         return NULL;
-
-    if (head == NULL) {
-        /* list is empty */
-        cache = fetch_cache(config);
-        cache->head = node;
-        ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, r->server,
-                     "Upload Progress: Inserted node into an empty list.");
-    } else {
-        upload_progress_node_t *tail = fetch_last_node(config);
-        tail->next = node;
-        ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, r->server,
-                     "Upload Progress: Inserted node at the end of the list.");
     }
+    node = &cache->nodes[cache->list[cache->active]];
+    cache->active += 1;
 
+    strncpy(node->key, key, PROGRESS_KEY_LEN);
     fill_new_upload_node_data(node, r);
-    node->next = NULL;
 
     return node;
 }
 
 upload_progress_node_t *find_node(request_rec *r, const char *key) {
-    upload_progress_node_t *node;
+/**/up_log(APLOG_MARK, APLOG_DEBUG, 0, r->server, "find_node()");
 
-/**/ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, r->server, "find_node()");
+    ServerConfig *config = get_server_config(r->server);
+    upload_progress_cache_t *cache = config->cache;
+    upload_progress_node_t *node, *nodes = cache->nodes;
+    int *list = cache->list;
+    int active = cache->active;
+    int i;
 
-    ServerConfig *config = (ServerConfig*)ap_get_module_config(r->server->module_config, &upload_progress_module);
-
-    node = fetch_first_node(config);
-    if(node == NULL) {
-        return NULL;
+    for (i = 0; i < active; i++) {
+        node = &nodes[list[i]];
+        if (check_node(node, key))
+          return node;
     }
-
-    while(node != NULL) {
-        if(check_node(config, node, key)) {
-            return node;
-        }
-
-        node = fetch_node(config, node->next);
-    }
-
-    return node;
+    return NULL;
 }
 
 static apr_status_t upload_progress_cleanup(void *data)
 {
-/**/ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, global_server, "upload_progress_cleanup()");
+/**/up_log(APLOG_MARK, APLOG_DEBUG, 0, global_server, "upload_progress_cleanup()");
 
     /* FIXME: this function should use locking because it modifies node data */
     upload_progress_context_t *ctx = (upload_progress_context_t *)data;
@@ -660,85 +544,49 @@ static apr_status_t upload_progress_cleanup(void *data)
 }
 
 static void clean_old_connections(request_rec *r) {
-/**/ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, r->server, "clean_old_connections()");
+/**/up_log(APLOG_MARK, APLOG_DEBUG, 0, r->server, "clean_old_connections()");
 
-    upload_progress_node_t *prev = NULL;
-    ServerConfig *config = get_server_config(r);
+    ServerConfig *config = get_server_config(r->server);
+    upload_progress_cache_t *cache = config->cache;
+    upload_progress_node_t *node, *nodes = cache->nodes;
+    int *list = cache->list;
+    int i, tmp;
+    time_t t = time(NULL);
 
-    upload_progress_node_t *node = fetch_first_node(config);
-    while(node != NULL) {
-        if(time(NULL) > node->expires && node->done == 1 && node->expires != -1) {
-            /*clean*/
-            if(prev == NULL) {
-                /* head */
-                upload_progress_cache_t *cache = fetch_cache(config);
-                cache->head = fetch_node(config, node->next);
-                cache_free(config, node->key);
-                cache_free(config, node);
-                node = cache->head;
-            } else {
-                prev->next = node->next;
-                cache_free(config, node->key);
-                cache_free(config, node);
-                node = prev;
-            }
-            continue;
+    for (i = 0; i < cache->active; i++) {
+        node = &nodes[list[i]];
+        if (t > node->expires && node->done == 1 && node->expires != -1) {
+            cache->active -= 1;
+            tmp = list[cache->active];
+            list[cache->active] = list[i];
+            list[i] = tmp;
+            i--;
         }
 
-        prev = node;
-        node = fetch_node(config, node->next);
     }
-}
-
-void upload_progress_destroy_cache(ServerConfig *config) {
-/**/ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, global_server, "upload_progress_destroy_cache()");
-
-    upload_progress_cache_t *cache = fetch_cache(config);
-    upload_progress_node_t *node, *temp;
-
-    node = fetch_node(config, cache->head);
-    while(node != NULL) {
-        temp = fetch_node(config, node->next);
-
-        cache_free(config, node);
-        node = temp;
-    }
-
-    cache_free(config, cache);
 }
 
 static apr_status_t upload_progress_cache_module_kill(void *data)
 {
-/**/ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, global_server, "upload_progress_cache_module_kill()");
+/**/up_log(APLOG_MARK, APLOG_DEBUG, 0, global_server, "upload_progress_cache_module_kill()");
 
-    ServerConfig *st = (ServerConfig*)data;
-
-    upload_progress_destroy_cache(st);
-
-#if APR_HAS_SHARED_MEMORY
-    //FIXME!: Second block of code gets never executed!
-    if (st->cache_rmm != NULL) {
-        apr_rmm_destroy (st->cache_rmm);
-        st->cache_rmm = NULL;
-    }
-    if (st->cache_shm != NULL) {
-        apr_status_t result = apr_shm_destroy(st->cache_shm);
-        st->cache_shm = NULL;
-        return result;
-    }
-#endif
     return APR_SUCCESS;
+}
+
+void *rmm_calloc(apr_rmm_t *rmm, apr_size_t reqsize)
+{
+    apr_rmm_off_t block = apr_rmm_calloc(rmm, reqsize);
+    return block ? apr_rmm_addr_get(rmm, block) : NULL;
 }
 
 apr_status_t upload_progress_cache_init(apr_pool_t *pool, ServerConfig *config)
 {
-/**/ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, global_server, "upload_progress_cache_init()");
+/**/up_log(APLOG_MARK, APLOG_DEBUG, 0, global_server, "upload_progress_cache_init()");
 
-#if APR_HAS_SHARED_MEMORY
     apr_status_t result;
     apr_size_t size;
     upload_progress_cache_t *cache;
-    apr_rmm_off_t block;
+    int nodes_cnt, i;
 
     if (config->cache_file) {
         /* Remove any existing shm segment with this name. */
@@ -765,15 +613,26 @@ apr_status_t upload_progress_cache_init(apr_pool_t *pool, ServerConfig *config)
     apr_pool_cleanup_register(config->pool, config , upload_progress_cache_module_kill, apr_pool_cleanup_null);
 
     /* init cache object */
-    block = apr_rmm_calloc(config->cache_rmm, sizeof(upload_progress_cache_t));
-    cache = block ? (upload_progress_cache_t *)apr_rmm_addr_get(config->cache_rmm, block) : NULL;
-    if (cache == NULL) {
-        return 0;
-    }
-    cache->head = NULL;
-    config->cache_offset = block;
+    cache = (upload_progress_cache_t *)rmm_calloc(config->cache_rmm,
+                                        sizeof(upload_progress_cache_t));
+    if (!cache) return APR_ENOMEM;
+
     config->cache = cache;
-#endif
+    nodes_cnt = ((size - sizeof(upload_progress_cache_t)) /
+                (sizeof(upload_progress_node_t) + sizeof(int))) - 1;
+    cache->count = nodes_cnt;
+    cache->active = 0;
+
+    cache->list = (int *)rmm_calloc(config->cache_rmm, nodes_cnt * sizeof(int));
+    if (!cache->list) return APR_ENOMEM;
+    for (i = 0; i < nodes_cnt; i++) cache->list[i] = i;
+
+    cache->nodes = (upload_progress_node_t *)rmm_calloc(config->cache_rmm,
+                       nodes_cnt * sizeof(upload_progress_node_t));
+    if (!cache->nodes) return APR_ENOMEM;
+
+    ap_log_error(APLOG_MARK, APLOG_INFO, 0, global_server,
+                 "Upload Progress: monitoring %i simultaneous uploads", nodes_cnt);
 
     return APR_SUCCESS;
 }
@@ -781,14 +640,14 @@ apr_status_t upload_progress_cache_init(apr_pool_t *pool, ServerConfig *config)
 int upload_progress_init(apr_pool_t *p, apr_pool_t *plog,
                     apr_pool_t *ptemp,
                     server_rec *s) {
-/**/ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, s, "upload_progress_init()");
+/**/up_log(APLOG_MARK, APLOG_DEBUG, 0, s, "upload_progress_init()");
 /**/global_server = s;
 
     apr_status_t result;
     server_rec *s_vhost;
     ServerConfig *st_vhost;
 
-    ServerConfig *config = (ServerConfig*)ap_get_module_config(s->module_config, &upload_progress_module);
+    ServerConfig *config = get_server_config(s);
 
     void *data;
     const char *userdata_key = "upload_progress_init";
@@ -801,7 +660,6 @@ int upload_progress_init(apr_pool_t *p, apr_pool_t *plog,
         apr_pool_userdata_set((const void *)1, userdata_key,
                                apr_pool_cleanup_null, s->process->pool);
 
-    #if APR_HAS_SHARED_MEMORY
         /* If the cache file already exists then delete it.  Otherwise we are
          * going to run into problems creating the shared memory. */
         if (config->cache_file) {
@@ -809,16 +667,13 @@ int upload_progress_init(apr_pool_t *p, apr_pool_t *plog,
                                          NULL);
             apr_file_remove(lck_file, ptemp);
         }
-    #endif
         return OK;
     }
 
-#if APR_HAS_SHARED_MEMORY
     /* initializing cache if shared memory size is not zero and we already
      * don't have shm address
      */
     if (!config->cache_shm && config->cache_bytes > 0) {
-#endif
         result = upload_progress_cache_init(p, config);
         if (result != APR_SUCCESS) {
             ap_log_error(APLOG_MARK, APLOG_ERR, result, s,
@@ -826,12 +681,10 @@ int upload_progress_init(apr_pool_t *p, apr_pool_t *plog,
             return DONE;
         }
 
-#if APR_HAS_SHARED_MEMORY
         if (config->cache_file) {
             config->lock_file = apr_pstrcat(config->pool, config->cache_file, ".lck",
                                         NULL);
         }
-#endif
 
         result = apr_global_mutex_create(&config->cache_lock,
                                          config->lock_file, APR_LOCK_DEFAULT,
@@ -852,40 +705,34 @@ int upload_progress_init(apr_pool_t *p, apr_pool_t *plog,
         /* merge config in all vhost */
         s_vhost = s->next;
         while (s_vhost) {
-            st_vhost = (ServerConfig *)
-                       ap_get_module_config(s_vhost->module_config,
-                                            &upload_progress_module);
+            st_vhost = get_server_config(s_vhost);
 
-#if APR_HAS_SHARED_MEMORY
             st_vhost->cache_shm = config->cache_shm;
             st_vhost->cache_rmm = config->cache_rmm;
             st_vhost->cache_file = config->cache_file;
-            st_vhost->cache_offset = config->cache_offset;
             st_vhost->cache = config->cache;
-            ap_log_error(APLOG_MARK, APLOG_DEBUG, result, s,
+            up_log(APLOG_MARK, APLOG_DEBUG, result, s,
                          "Upload Progress: merging Shared Cache conf: shm=0x%pp rmm=0x%pp "
                          "for VHOST: %s", config->cache_shm, config->cache_rmm,
                          s_vhost->server_hostname);
-#endif
 
+            st_vhost->cache_lock = config->cache_lock;
             st_vhost->lock_file = config->lock_file;
             s_vhost = s_vhost->next;
         }
 
-#if APR_HAS_SHARED_MEMORY
     } else {
         ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, s,
                      "Upload Progress cache: cache size is zero, disabling "
                      "shared memory cache");
     }
-#endif
 
     return(OK);
 }
 
 static int reportuploads_handler(request_rec *r)
 { 
-/**/ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, r->server, "reportuploads_handler()");
+/**/up_log(APLOG_MARK, APLOG_DEBUG, 0, r->server, "reportuploads_handler()");
 
     apr_size_t length, received, speed;
     time_t started_at=0;
@@ -904,26 +751,20 @@ static int reportuploads_handler(request_rec *r)
     const char *id = get_progress_id(r);
 
     if (id == NULL) {
-    ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, r->server,
-                 "Upload Progress: Not found id in location with reports enabled. uri=%s", id, r->uri);
+        ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, r->server,
+                     "Upload Progress: Report requested without id. uri=%s", id, r->uri);
         return HTTP_NOT_FOUND;
     } else {
         ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, r->server,
-                     "Upload Progress: Found id=%s in location with reports enables. uri=%s", id, r->uri);
+                     "Upload Progress: Report requested with id=%s. uri=%s", id, r->uri);
     }
 
-    ServerConfig *config = (ServerConfig*)ap_get_module_config(r->server->module_config, &upload_progress_module);
-
-    if (config->cache_rmm == NULL) {
-        ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, r->server,
-                     "Upload Progress: Cache error while generating report");
-        return HTTP_INTERNAL_SERVER_ERROR ;
-    }
+    ServerConfig *config = get_server_config(r->server);
 
     CACHE_LOCK();
     upload_progress_node_t *node = find_node(r, id);
     if (node != NULL) {
-        ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, r->server,
+        up_log(APLOG_MARK, APLOG_DEBUG, 0, r->server,
                      "Node with id=%s found for report", id);
         received = node->received;
         length = node->length;
@@ -933,7 +774,7 @@ static int reportuploads_handler(request_rec *r)
         err_status = node->err_status;
         found = 1;
     } else {
-        ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, r->server,
+        up_log(APLOG_MARK, APLOG_DEBUG, 0, r->server,
                      "Node with id=%s not found for report", id);
     }
     CACHE_UNLOCK();
@@ -968,7 +809,7 @@ static int reportuploads_handler(request_rec *r)
     /* get the jsonp callback if any */
     const char *jsonp = get_json_callback_param(r);
 
-    ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, r->server,
+    up_log(APLOG_MARK, APLOG_DEBUG, 0, r->server,
                        "Upload Progress: JSON-P callback: %s.", jsonp);
 
     // fix up response for jsonp request, if needed
@@ -985,15 +826,15 @@ static int reportuploads_handler(request_rec *r)
 
 static void upload_progress_child_init(apr_pool_t *p, server_rec *s)
 {
-/**/ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, s, "upload_progress_child_init()");
+/**/up_log(APLOG_MARK, APLOG_DEBUG, 0, s, "upload_progress_child_init()");
 
     apr_status_t sts;
-    ServerConfig *st = (ServerConfig *)ap_get_module_config(s->module_config, &upload_progress_module);
-    server_rec *s_vhost;
-    ServerConfig *st_vhost;
+    ServerConfig *st = get_server_config(s);
 
-    if (!st->cache_lock)
+    if (!st->cache_lock) {
+        ap_log_error(APLOG_MARK, APLOG_CRIT, 0, s, "Global mutex not set.");
         return;
+    }
 
     sts = apr_global_mutex_child_init(&st->cache_lock, st->lock_file, p);
     if (sts != APR_SUCCESS) {
@@ -1001,12 +842,5 @@ static void upload_progress_child_init(apr_pool_t *p, server_rec *s)
                      "Failed to initialise global mutex %s in child process %"
                      APR_PID_T_FMT ".",
                      st->lock_file, getpid());
-    }
-
-    s_vhost = s->next;
-    while (s_vhost) {
-        st_vhost = (ServerConfig *)ap_get_module_config(s_vhost->module_config, &upload_progress_module);
-        st_vhost->cache_lock = st->cache_lock;
-        s_vhost = s_vhost->next;
     }
 }

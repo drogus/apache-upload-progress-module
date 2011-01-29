@@ -1,11 +1,7 @@
 -include local-options.mk
 
 ifndef APXS
-  APXS := $(shell which apxs2)
-endif
-
-ifndef APXS
-  APXS := $(shell which apxs)
+  APXS := $(shell which apxs2 || which apxs)
 endif
 
 ifndef APXS
