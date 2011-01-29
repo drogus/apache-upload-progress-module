@@ -144,6 +144,8 @@ shm_remove_failed:
 #endif /* APR_MAJOR_VERSION<1 */
 /* END OF PATCH ------------------------------------------------------------ */
 
+#endif
+
 #define CACHE_LOCK() do {                                  \
     if (config->cache_lock) {                              \
         char errbuf[200];                                  \
