@@ -538,7 +538,7 @@ static apr_status_t upload_progress_cleanup(void *data)
 
     upload_progress_context_t *ctx = (upload_progress_context_t *)data;
 
-    if (ctx->node) {
+    if (ctx && ctx->node) {
         ctx->node->err_status = read_request_status(ctx->r);
         ctx->node->expires = time(NULL) + 60; /* expires in 60s */
         ctx->node->done = 1;
