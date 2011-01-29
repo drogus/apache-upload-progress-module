@@ -533,7 +533,9 @@ static apr_status_t upload_progress_cleanup(void *data)
 {
 /**/up_log(APLOG_MARK, APLOG_DEBUG, 0, global_server, "upload_progress_cleanup()");
 
-    /* FIXME: this function should use locking because it modifies node data */
+    /* this function should use locking because it modifies node data */
+    CACHE_LOCK();
+
     upload_progress_context_t *ctx = (upload_progress_context_t *)data;
 
     if (ctx->node) {
@@ -541,6 +543,8 @@ static apr_status_t upload_progress_cleanup(void *data)
         ctx->node->expires = time(NULL) + 60; /* expires in 60s */
         ctx->node->done = 1;
     }
+
+    CACHE_LOCK();
 
     return APR_SUCCESS;
 }
