@@ -586,10 +586,10 @@ upload_progress_node_t *find_node(request_rec *r, const char *key) {
 static apr_status_t upload_progress_cleanup(void *data)
 {
 /**/up_log(APLOG_MARK, APLOG_DEBUG, 0, global_server, "upload_progress_cleanup()");
-    ServerConfig *config = get_server_config(global_server);
+//    ServerConfig *config = get_server_config(global_server);
 
     /* this function should use locking because it modifies node data */
-    CACHE_LOCK();
+//    CACHE_LOCK();
 
     upload_progress_context_t *ctx = (upload_progress_context_t *)data;
 
@@ -599,7 +599,7 @@ static apr_status_t upload_progress_cleanup(void *data)
         ctx->node->done = 1;
     }
 
-    CACHE_LOCK();
+//    CACHE_LOCK();
 
     return APR_SUCCESS;
 }
