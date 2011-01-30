@@ -586,6 +586,7 @@ upload_progress_node_t *find_node(request_rec *r, const char *key) {
 static apr_status_t upload_progress_cleanup(void *data)
 {
 /**/up_log(APLOG_MARK, APLOG_DEBUG, 0, global_server, "upload_progress_cleanup()");
+    ServerConfig *config = get_server_config(global_server);
 
     /* this function should use locking because it modifies node data */
     CACHE_LOCK();
