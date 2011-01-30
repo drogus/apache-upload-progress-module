@@ -30,9 +30,25 @@
 #ifndef UP_DEBUG
 #  define UP_DEBUG 0
 #endif
-#define PROGRESS_KEY_TEMPLATE "12345678-0000-0000-0000-123456789012"
-#ifndef PROGRESS_KEY_LEN
-#  define PROGRESS_KEY_LEN strlen(PROGRESS_KEY_TEMPLATE)
+
+#ifndef ARG_ALLOWED_PROGRESSID
+#  define ARG_ALLOWED_PROGRESSID "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_:./!{}"
+#endif
+#ifndef ARG_ALLOWED_JSONPCALLBACK
+#  define ARG_ALLOWED_JSONPCALLBACK "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._$"
+#endif
+#ifndef ARG_MINLEN_PROGRESSID
+#  define ARG_MINLEN_PROGRESSID 8
+#endif
+#ifndef ARG_MAXLEN_PROGRESSID
+#  define ARG_MAXLEN_PROGRESSID 128
+#endif
+#ifndef ARG_MINLEN_JSONPCALLBACK
+#  define ARG_MINLEN_JSONPCALLBACK 1
+#endif
+#ifndef ARG_MAXLEN_JSONPCALLBACK
+/* This limit is set by most JS implementations on identifier length */
+#  define ARG_MAXLEN_JSONPCALLBACK 64
 #endif
 
 #if UP_DEBUG == 1
@@ -180,7 +196,7 @@ typedef struct upload_progress_node_s{
     apr_size_t speed; /* bytes per second */
     time_t expires;
     int done;
-    char key[PROGRESS_KEY_LEN];
+    char key[ARG_MAXLEN_PROGRESSID];
 } upload_progress_node_t;
 
 typedef struct {
@@ -217,6 +233,7 @@ static void clean_old_connections(request_rec *r);
 void fill_new_upload_node_data(upload_progress_node_t *node, request_rec *r);
 static apr_status_t upload_progress_cleanup(void *data);
 const char *get_progress_id(request_rec *r);
+int check_request_argument(char *value, char *allowed, int minlen, int maxlen);
 static const char *track_upload_progress_cmd(cmd_parms *cmd, void *dummy, int arg);
 static const char *report_upload_progress_cmd(cmd_parms *cmd, void *dummy, int arg);
 void *upload_progress_config_create_dir(apr_pool_t *p, char *dirspec);
@@ -285,6 +302,9 @@ static int upload_progress_handle_request(request_rec *r)
             const char* id = get_progress_id(r);
 
             if (id != NULL) {
+                if (id == ~NULL)
+                    return HTTP_NOT_FOUND; //Also possible: HTTP_BAD_REQUEST to cancel or DECLINE to ignore such requests
+
                 up_log(APLOG_MARK, APLOG_DEBUG, 0, r->server,
                              "Upload Progress: Progress id found: %s.", id);
 
@@ -399,6 +419,8 @@ static int track_upload_progress(ap_filter_t *f, apr_bucket_brigade *bb,
     const char* id = get_progress_id(f->r);
     if (id == NULL)
         return rv;
+    if (id == ~NULL)
+        return HTTP_BAD_REQUEST; //Also possible: DECLINE to ignore such requests
 
     CACHE_LOCK();
     node = find_node(f->r, id);
@@ -419,6 +441,26 @@ static int track_upload_progress(ap_filter_t *f, apr_bucket_brigade *bb,
     CACHE_UNLOCK();
 
     return rv;
+}
+
+int check_request_argument(char *value, char *allowed, int minlen, int maxlen) {
+    //Empty strings are valid if no minimal length required
+    if(!value) {
+        return !minlen;
+    }
+
+    //Check the length of the argument
+    if(strlen(value) > maxlen) {
+        return FALSE;
+    }
+
+    //If no whitelist given, assume everything whitelisted
+    if(!allowed) {
+        return TRUE;
+    }
+
+    //Check each char to be in the whitelist
+    return strlen(value) == strspn(value, allowed);
 }
 
 char *get_param_value(char *p, const char *param_name, int *len) {
@@ -451,7 +493,11 @@ const char *get_progress_id(request_rec *r) {
     if (id == NULL) {
         val = get_param_value(r->args, PROGRESS_ID, &len);
         if (val)
-            if (len > PROGRESS_KEY_LEN) len = PROGRESS_KEY_LEN;
+            if(!check_request_argument(val, ARG_ALLOWED_PROGRESSID,
+                    ARG_MINLEN_PROGRESSID, ARG_MAXLEN_PROGRESSID)) {
+                return ~NULL; //Signal invalid parameter value
+            }
+
             id = apr_pstrndup(r->connection->pool, val, len);
     }
 
@@ -464,14 +510,19 @@ const char *get_json_callback_param(request_rec *r) {
 
     val = get_param_value(r->args, JSON_CB_PARAM, &len);
     if (val) {
+        if(!check_request_argument(val, ARG_ALLOWED_JSONPCALLBACK,
+                ARG_MINLEN_JSONPCALLBACK, ARG_MAXLEN_JSONPCALLBACK)) {
+            return ~NULL; //Signal invalid parameter value
+        }
+
         return apr_pstrndup(r->connection->pool, val, len);
-    } else {
-        return NULL;
     }
+
+    return NULL;
 }
 
 inline int check_node(upload_progress_node_t *node, const char *key) {
-    return strncasecmp(node->key, key, PROGRESS_KEY_LEN) == 0 ? 1 : 0;
+    return strncasecmp(node->key, key, ARG_MAXLEN_PROGRESSID) == 0 ? 1 : 0;
 }
 
 void fill_new_upload_node_data(upload_progress_node_t *node, request_rec *r) {
