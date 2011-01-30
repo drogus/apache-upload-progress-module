@@ -396,6 +396,7 @@ int read_request_status(request_rec *r)
     if (r) {
         /* error status rendered in status line is preferred because passenger
            clobbers request_rec->status when exception occurs */
+        /* FIXME: Shouldn't we read r->status instead as it's already preparsed? */
         status = r->status_line ? atoi(r->status_line) : 0;
         if (!ap_is_HTTP_VALID_RESPONSE(status))
             status = r->status;
