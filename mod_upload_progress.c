@@ -454,6 +454,9 @@ int check_request_argument(char *value, char *allowed, int minlen, int maxlen) {
     if(strlen(value) > maxlen) {
         return FALSE;
     }
+    if(strlen(value) < minlen) {
+        return FALSE;
+    }
 
     //If no whitelist given, assume everything whitelisted
     if(!allowed) {
