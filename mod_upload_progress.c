@@ -559,7 +559,7 @@ upload_progress_node_t* insert_node(request_rec *r, const char *key) {
     node = &cache->nodes[cache->list[cache->active]];
     cache->active += 1;
 
-    strncpy(node->key, key, PROGRESS_KEY_LEN);
+    strncpy(node->key, key, ARG_MAXLEN_PROGRESSID);
     fill_new_upload_node_data(node, r);
 
     return node;
