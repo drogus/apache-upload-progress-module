@@ -812,7 +812,11 @@ static int reportuploads_handler(request_rec *r)
 
     if (id == NULL) {
         ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, r->server,
-                     "Upload Progress: Report requested without id. uri=%s", id, r->uri);
+                     "Upload Progress: Report requested without id. uri=%s", r->uri);
+        return HTTP_NOT_FOUND;
+    } else if ((intptr_t)id == ~(intptr_t)NULL) {
+        ap_log_error(APLOG_MARK, APLOG_INFO, 0, r->server,
+                     "Upload Progress: Report requested for invalid id. uri=%s", r->uri);
         return HTTP_NOT_FOUND;
     } else {
         ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, r->server,
