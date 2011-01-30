@@ -181,20 +181,19 @@ typedef struct upload_progress_node_s{
     time_t expires;
     int done;
     char key[PROGRESS_KEY_LEN];
-}upload_progress_node_t;
+} upload_progress_node_t;
 
 typedef struct {
     int count;
     int active;
     upload_progress_node_t *nodes; /* all nodes allocated at once */
     int *list; /* static array of node indexes, list begins with indexes of active nodes */
-}upload_progress_cache_t;
+} upload_progress_cache_t;
 
 typedef struct {
     request_rec *r;
     upload_progress_node_t *node;
-}upload_progress_context_t;
-
+} upload_progress_context_t;
 
 typedef struct {
     server_rec *server;
@@ -323,7 +322,7 @@ static int upload_progress_handle_request(request_rec *r)
 static const char *report_upload_progress_cmd(cmd_parms *cmd, void *config, int arg)
 {
 /**/up_log(APLOG_MARK, APLOG_DEBUG, 0, global_server, "report_upload_progress_cmd()");
-    DirConfig* dir = (DirConfig*)config ;
+    DirConfig* dir = (DirConfig *)config;
     dir->report_enabled = arg;
     return NULL;
 }
@@ -331,7 +330,7 @@ static const char *report_upload_progress_cmd(cmd_parms *cmd, void *config, int 
 static const char *track_upload_progress_cmd(cmd_parms *cmd, void *config, int arg)
 {
 /**/up_log(APLOG_MARK, APLOG_DEBUG, 0, global_server, "track_upload_progress_cmd()");
-    DirConfig* dir = (DirConfig*)config ;
+    DirConfig* dir = (DirConfig *)config;
     dir->track_enabled = arg;
     return NULL;
 }
@@ -352,9 +351,9 @@ static const char* upload_progress_shared_memory_size_cmd(cmd_parms *cmd, void *
     return NULL;
 }
 
-void * upload_progress_config_create_dir(apr_pool_t *p, char *dirspec) {
+void *upload_progress_config_create_dir(apr_pool_t *p, char *dirspec) {
 /**/up_log(APLOG_MARK, APLOG_DEBUG, 0, global_server, "upload_progress_config_create_dir()");
-    DirConfig* dir = (DirConfig*)apr_pcalloc(p, sizeof(DirConfig));
+    DirConfig* dir = (DirConfig *)apr_pcalloc(p, sizeof(DirConfig));
     dir->report_enabled = 0;
     dir->track_enabled = 0;
     return dir;
@@ -568,7 +567,6 @@ static void clean_old_connections(request_rec *r) {
             list[i] = tmp;
             i--;
         }
-
     }
 }
 
