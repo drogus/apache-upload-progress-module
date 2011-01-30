@@ -294,7 +294,7 @@ static int upload_progress_handle_request(request_rec *r)
     DirConfig* dir = (DirConfig*)ap_get_module_config(r->per_dir_config, &upload_progress_module);
     ServerConfig *config = get_server_config(r->server);
 
-    if (dir->track_enabled) {
+    if (dir && dir->track_enabled) {
         if (r->method_number == M_POST) {
             ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, r->server,
                          "Upload Progress: Upload in trackable location: %s.", r->uri);
