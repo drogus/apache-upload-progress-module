@@ -302,7 +302,7 @@ static int upload_progress_handle_request(request_rec *r)
             const char* id = get_progress_id(r);
 
             if (id != NULL) {
-                if (id == ~NULL)
+                if ((intptr_t)id == ~(intptr_t)NULL)
                     return HTTP_NOT_FOUND; //Also possible: HTTP_BAD_REQUEST to cancel or DECLINE to ignore such requests
 
                 up_log(APLOG_MARK, APLOG_DEBUG, 0, r->server,
@@ -420,7 +420,7 @@ static int track_upload_progress(ap_filter_t *f, apr_bucket_brigade *bb,
     const char* id = get_progress_id(f->r);
     if (id == NULL)
         return rv;
-    if (id == ~NULL)
+    if ((intptr_t)id == ~(intptr_t)NULL)
         return HTTP_BAD_REQUEST; //Also possible: DECLINE to ignore such requests
 
     CACHE_LOCK();
@@ -499,7 +499,7 @@ const char *get_progress_id(request_rec *r) {
         if (val)
             if(!check_request_argument(val, ARG_ALLOWED_PROGRESSID,
                     ARG_MINLEN_PROGRESSID, ARG_MAXLEN_PROGRESSID)) {
-                return ~NULL; //Signal invalid parameter value
+                return (char *)~(intptr_t)NULL; //Signal invalid parameter value
             }
 
             id = apr_pstrndup(r->connection->pool, val, len);
@@ -516,7 +516,7 @@ const char *get_json_callback_param(request_rec *r) {
     if (val) {
         if(!check_request_argument(val, ARG_ALLOWED_JSONPCALLBACK,
                 ARG_MINLEN_JSONPCALLBACK, ARG_MAXLEN_JSONPCALLBACK)) {
-            return ~NULL; //Signal invalid parameter value
+            return (char *)~(intptr_t)NULL; //Signal invalid parameter value
         }
 
         return apr_pstrndup(r->connection->pool, val, len);
