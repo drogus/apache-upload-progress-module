@@ -208,13 +208,15 @@ static int upload_progress_handle_request(request_rec *r)
                     node = insert_node(r, id);
                     if (node)
                         up_log(APLOG_MARK, APLOG_DEBUG, 0, r->server,
-                                     "Upload Progress: Added upload with id=%s to list.", id);
+                               "Upload Progress: Added upload with id='%s' to list.", id);
                 } else if (node->done) {
                     fill_new_upload_node_data(node, r);
                     up_log(APLOG_MARK, APLOG_DEBUG, 0, r->server,
-                                 "Upload Progress: Reused existing node with id '%s'.", id);
+                                 "Upload Progress: Reused existing node with id='%s'.", id);
                 } else {
                     node = NULL;
+                    ap_log_error(APLOG_MARK, APLOG_INFO, 0, r->server,
+                                 "Upload Progress: Upload with id='%s' already exists, ignoring.", id);
                 }
 
                 if (node) {
@@ -225,6 +227,18 @@ static int upload_progress_handle_request(request_rec *r)
                     ap_add_input_filter("UPLOAD_PROGRESS", NULL, r, r->connection);
                 }
                 CACHE_UNLOCK();
+
+            } else if (param_error < 0) {
+                ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, r->server,
+                             "Upload Progress: Upload with invalid ID in trackable location: %s.", r->uri);
+                /*
+                return HTTP_BAD_REQUEST;
+                return HTTP_NOT_FOUND;
+                */
+
+            } else {
+                ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, r->server,
+                             "Upload Progress: Upload without ID in trackable location: %s.", r->uri);
             }
         }
     }
@@ -565,7 +579,8 @@ apr_status_t upload_progress_cache_init(apr_pool_t *pool, ServerConfig *config)
     if (!cache->nodes) return APR_ENOMEM;
 
     ap_log_error(APLOG_MARK, APLOG_INFO, 0, global_server,
-                 "Upload Progress: monitoring %i simultaneous uploads", nodes_cnt);
+                 "Upload Progress: monitoring max %i simultaneous uploads, id (%s) length %i..%i",
+                 nodes_cnt, PROGRESS_ID, ARG_MINLEN_PROGRESSID, ARG_MAXLEN_PROGRESSID);
 
     return APR_SUCCESS;
 }
@@ -684,13 +699,19 @@ static int reportuploads_handler(request_rec *r)
     const char *id = get_progress_id(r, &param_error);
 
     if (id == NULL) {
-        ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, r->server,
-                     "Upload Progress: Report requested without id. uri=%s", id, r->uri);
-        return HTTP_NOT_FOUND;
-    } else {
-        ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, r->server,
-                     "Upload Progress: Report requested with id=%s. uri=%s", id, r->uri);
+        if (param_error < 0) {
+            ap_log_error(APLOG_MARK, APLOG_INFO, 0, r->server,
+                         "Upload Progress: Report requested with invalid id. uri=%s", r->uri);
+            return HTTP_BAD_REQUEST;
+        } else {
+            ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, r->server,
+                         "Upload Progress: Report requested without id. uri=%s", r->uri);
+            return HTTP_NOT_FOUND;
+        }
     }
+
+    ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, r->server,
+                 "Upload Progress: Report requested with id='%s'. uri=%s", id, r->uri);
 
     ServerConfig *config = get_server_config(r->server);
 
