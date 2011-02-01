@@ -131,8 +131,7 @@ upload_progress_node_t *find_node(request_rec *r, const char *key);
 static void clean_old_connections(request_rec *r);
 void fill_new_upload_node_data(upload_progress_node_t *node, request_rec *r);
 static apr_status_t upload_progress_cleanup(void *data);
-const char *get_progress_id(request_rec *r);
-int check_request_argument(char *value, char *allowed, int minlen, int maxlen);
+const char *get_progress_id(request_rec *, int *);
 static const char *track_upload_progress_cmd(cmd_parms *cmd, void *dummy, int arg);
 static const char *report_upload_progress_cmd(cmd_parms *cmd, void *dummy, int arg);
 void *upload_progress_config_create_dir(apr_pool_t *p, char *dirspec);
@@ -195,18 +194,13 @@ static int upload_progress_handle_request(request_rec *r)
 
     if (dir && dir->track_enabled) {
         if (r->method_number == M_POST) {
-            ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, r->server,
-                         "Upload Progress: Upload in trackable location: %s.", r->uri);
 
-            const char* id = get_progress_id(r);
+            int param_error;
+            const char* id = get_progress_id(r, &param_error);
 
-            if (id != NULL) {
-                if ((intptr_t)id == ~(intptr_t)NULL)
-                    return HTTP_NOT_FOUND; //Also possible: HTTP_BAD_REQUEST to cancel or DECLINE to ignore such requests
-
-                up_log(APLOG_MARK, APLOG_DEBUG, 0, r->server,
-                             "Upload Progress: Progress id found: %s.", id);
-
+            if (id) {
+                ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, r->server,
+                             "Upload Progress: Upload id='%s' in trackable location: %s.", id, r->uri);
                 CACHE_LOCK();
                 clean_old_connections(r);
                 upload_progress_node_t *node = find_node(r, id);
@@ -316,11 +310,10 @@ static int track_upload_progress(ap_filter_t *f, apr_bucket_brigade *bb,
 
     rv = ap_get_brigade(f->next, bb, mode, block, readbytes);
 
-    const char* id = get_progress_id(f->r);
-    if (id == NULL)
-        return rv;
-    if ((intptr_t)id == ~(intptr_t)NULL)
-        return HTTP_BAD_REQUEST; //Also possible: DECLINE to ignore such requests
+    int param_error;
+    const char* id = get_progress_id(f->r, &param_error);
+
+    if (id == NULL) return rv;
 
     CACHE_LOCK();
     node = find_node(f->r, id);
@@ -343,27 +336,15 @@ static int track_upload_progress(ap_filter_t *f, apr_bucket_brigade *bb,
     return rv;
 }
 
-int check_request_argument(char *value, char *allowed, int minlen, int maxlen) {
-    //Empty strings are valid if no minimal length required
-    if(!value) {
-        return !minlen;
-    }
-
-    //Check the length of the argument
-    if(strlen(value) > maxlen) {
-        return FALSE;
-    }
-    if(strlen(value) < minlen) {
-        return FALSE;
-    }
-
-    //If no whitelist given, assume everything whitelisted
-    if(!allowed) {
-        return TRUE;
-    }
-
-    //Check each char to be in the whitelist
-    return strlen(value) == strspn(value, allowed);
+int check_request_argument(const char *value, int len, char *allowed, int minlen, int maxlen) {
+    /* Check the length of the argument */
+    if (len > maxlen) return -1;
+    if (len < minlen) return -2;
+    /* If no whitelist given, assume everything whitelisted */
+    if (!allowed) return 0;
+    /* Check each char to be in the whitelist */
+    if (strspn(value, allowed) < len) return -3;
+    return 0;
 }
 
 char *get_param_value(char *p, const char *param_name, int *len) {
@@ -385,42 +366,44 @@ char *get_param_value(char *p, const char *param_name, int *len) {
     return p;
 }
 
-const char *get_progress_id(request_rec *r) {
-    char *val;
+const char *get_progress_id(request_rec *r, int *param_error) {
     int len;
 
-    //try to find progress id in headers
+    /* try to find progress id in http headers */
     const char *id  = apr_table_get(r->headers_in, PROGRESS_ID);
-
-    //if not found check args
-    if (id == NULL) {
-        val = get_param_value(r->args, PROGRESS_ID, &len);
-        if (val)
-            if(!check_request_argument(val, ARG_ALLOWED_PROGRESSID,
-                    ARG_MINLEN_PROGRESSID, ARG_MAXLEN_PROGRESSID)) {
-                return (char *)~(intptr_t)NULL; //Signal invalid parameter value
-            }
-
-            id = apr_pstrndup(r->connection->pool, val, len);
+    if (id) {
+        *param_error = check_request_argument(id, strlen(id), ARG_ALLOWED_PROGRESSID,
+            ARG_MINLEN_PROGRESSID, ARG_MAXLEN_PROGRESSID);
+        if (*param_error) return NULL;
+        return id;
     }
 
-    return id;
+    /* if progress id not found in headers, check request args (query string) */
+    id = get_param_value(r->args, PROGRESS_ID, &len);
+    if (id) {
+        *param_error = check_request_argument(id, len, ARG_ALLOWED_PROGRESSID,
+            ARG_MINLEN_PROGRESSID, ARG_MAXLEN_PROGRESSID);
+        if (*param_error) return NULL;
+        return apr_pstrndup(r->connection->pool, id, len);
+    }
+
+    *param_error = 1; /* not found */
+    return NULL;
 }
 
-const char *get_json_callback_param(request_rec *r) {
+const char *get_json_callback_param(request_rec *r, int *param_error) {
     char *val;
     int len;
 
     val = get_param_value(r->args, JSON_CB_PARAM, &len);
     if (val) {
-        if(!check_request_argument(val, ARG_ALLOWED_JSONPCALLBACK,
-                ARG_MINLEN_JSONPCALLBACK, ARG_MAXLEN_JSONPCALLBACK)) {
-            return (char *)~(intptr_t)NULL; //Signal invalid parameter value
-        }
-
+        *param_error = check_request_argument(val, len, ARG_ALLOWED_JSONPCALLBACK,
+            ARG_MINLEN_JSONPCALLBACK, ARG_MAXLEN_JSONPCALLBACK);
+        if (*param_error) return NULL;
         return apr_pstrndup(r->connection->pool, val, len);
     }
 
+    *param_error = 1; /* not found */
     return NULL;
 }
 
@@ -686,7 +669,7 @@ static int reportuploads_handler(request_rec *r)
 
     apr_size_t length, received, speed;
     time_t started_at=0;
-    int done=0, err_status, found=0;
+    int done=0, err_status, found=0, param_error;
     char *response;
     DirConfig* dir = (DirConfig*)ap_get_module_config(r->per_dir_config, &upload_progress_module);
 
@@ -698,7 +681,7 @@ static int reportuploads_handler(request_rec *r)
     }
 
     /* get the tracking id if any */
-    const char *id = get_progress_id(r);
+    const char *id = get_progress_id(r, &param_error);
 
     if (id == NULL) {
         ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, r->server,
@@ -757,7 +740,13 @@ static int reportuploads_handler(request_rec *r)
     char *completed_response;
 
     /* get the jsonp callback if any */
-    const char *jsonp = get_json_callback_param(r);
+    const char *jsonp = get_json_callback_param(r, &param_error);
+
+    if (param_error < 0) {
+        ap_log_error(APLOG_MARK, APLOG_INFO, 0, r->server,
+                     "Upload Progress: Report requested with invalid JSON-P callback. uri=%s", r->uri);
+        return HTTP_BAD_REQUEST;
+    }
 
     up_log(APLOG_MARK, APLOG_DEBUG, 0, r->server,
                        "Upload Progress: JSON-P callback: %s.", jsonp);
