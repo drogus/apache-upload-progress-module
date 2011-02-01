@@ -525,13 +525,6 @@ static void clean_old_connections(request_rec *r) {
     }
 }
 
-static apr_status_t upload_progress_cache_module_kill(void *data)
-{
-/**/up_log(APLOG_MARK, APLOG_DEBUG, 0, global_server, "upload_progress_cache_module_kill()");
-
-    return APR_SUCCESS;
-}
-
 void *rmm_calloc(apr_rmm_t *rmm, apr_size_t reqsize)
 {
     apr_rmm_off_t block = apr_rmm_calloc(rmm, reqsize);
@@ -568,8 +561,6 @@ apr_status_t upload_progress_cache_init(apr_pool_t *pool, ServerConfig *config)
     if (result != APR_SUCCESS) {
         return result;
     }
-
-    apr_pool_cleanup_register(config->pool, config , upload_progress_cache_module_kill, apr_pool_cleanup_null);
 
     /* init cache object */
     cache = (upload_progress_cache_t *)rmm_calloc(config->cache_rmm,
