@@ -21,31 +21,38 @@ Global config:
   UploadProgressSharedMemorySize 1024000 # sets memory size to 1MB
 
 Note:
-If you get "(12)Cannot allocate memory: Upload Progress cache: could not create shared memory segment Configuration Failed" 
-error you should try to set memory size to smaller value.
+  If you get "(12)Cannot allocate memory: Upload Progress cache: could not create shared memory segment Configuration Failed"
+  error you should try to set memory size to smaller value.
 
 Config for vhost:
-<Location />
-    # enable tracking uploads in /
-    TrackUploads On
-</Location>
+  <Location />
+      # enable tracking uploads in /
+      TrackUploads On
+  </Location>
 
-<Location /progress>
-    # enable upload progress reports in /progress
-    ReportUploads On
-</Location>
+  <Location /progress>
+      # enable upload progress reports in /progress
+      ReportUploads On
+  </Location>
+
+- Valid progress ID
+  Progress IDs are now validated: length must be within 8..128 characters,
+  identifier may contain alphanumeric characters and also -_:./!{}
 
 - JSON-P Support
-You can also request progress updates by using JSON-P, if you are uploading the file from a different domain or subdomain than the web server that is handling your original request. Adding a "callback=yourCallbackFunction" parameter to your request to the progress server will activate this functionality. 
+  You can also request progress updates by using JSON-P, if you are uploading
+  the file from a different domain or subdomain than the web server that is
+  handling your original request. Adding a "callback=yourCallbackFunction"
+  parameter to your request to the progress server will activate this functionality.
 
-For example, a request like:
-  http://uploads.yourdomain.com/progress?callback=jsonp123&X-Progress-ID=1234
-  
-Would return the JSON-P function: 
-  jsonp123(new Object({ 'state' : 'uploading', 'received' : 35587, 'size' : 716595, 'speed' : 35587 }));
-  
-The normal JSON request:
-  http://www.yourdomain.com/progress?X-Progress-ID=1234
+  For example, a request like:
+    http://uploads.yourdomain.com/progress?callback=jsonp123&X-Progress-ID=12345678
 
-Would return the JSON data: 
-  new Object({ 'state' : 'uploading', 'received' : 35587, 'size' : 716595, 'speed' : 35587 })
+  Would return the JSON-P function:
+    jsonp123({ "state" : "uploading", "received" : 35587, "size" : 716595, "speed" : 35587, "started_at": 1296568823, "uuid" : "12345678" });
+
+  The normal JSON request:
+    http://www.yourdomain.com/progress?X-Progress-ID=12345678
+
+  Would return the JSON data:
+    { "state" : "uploading", "received" : 35587, "size" : 716595, "speed" : 35587, "started_at": 1296568823, "uuid" : "12345678" }
