@@ -342,8 +342,9 @@ static int track_upload_progress(ap_filter_t *f, apr_bucket_brigade *bb,
             if (upload_time > 0) {
                 node->speed = (apr_size_t)(node->received / upload_time);
             }
+        } else {
+            node->err_status = read_request_status(f->r);
         }
-        node->err_status = read_request_status(f->r);
     }
     CACHE_UNLOCK();
 
