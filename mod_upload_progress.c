@@ -331,14 +331,16 @@ static int track_upload_progress(ap_filter_t *f, apr_bucket_brigade *bb,
 
     CACHE_LOCK();
     node = find_node(f->r, id);
-    if (node != NULL) {
+    if (node) {
+        time_t t = time(NULL);
+        node->expires = t + 60;
         if (rv == APR_SUCCESS) {
             apr_off_t length;
             apr_brigade_length(bb, 1, &length);
             node->received += (apr_size_t)length;
             if (node->received > node->length) /* handle chunked tranfer */
                 node->length = node->received;
-            time_t upload_time = time(NULL) - node->started_at;
+            time_t upload_time = t - node->started_at;
             if (upload_time > 0) {
                 node->speed = (apr_size_t)(node->received / upload_time);
             }
@@ -428,13 +430,14 @@ inline int check_node(upload_progress_node_t *node, const char *key) {
 
 void fill_new_upload_node_data(upload_progress_node_t *node, request_rec *r) {
     const char *content_length;
+    time_t t = time(NULL);
 
     node->received = 0;
     node->done = 0;
     node->err_status = 0;
-    node->started_at = time(NULL);
+    node->started_at = t;
     node->speed = 0;
-    node->expires = -1;
+    node->expires = t + 60;
     content_length = apr_table_get(r->headers_in, "Content-Length");
     node->length = 1;
     /* Content-Length is missing is case of chunked transfer encoding */
@@ -513,7 +516,7 @@ static void clean_old_connections(request_rec *r) {
 
     for (i = 0; i < cache->active; i++) {
         node = &nodes[list[i]];
-        if (t > node->expires && node->done == 1 && node->expires != -1) {
+        if (t > node->expires) {
             cache->active -= 1;
             tmp = list[cache->active];
             list[cache->active] = list[i];
