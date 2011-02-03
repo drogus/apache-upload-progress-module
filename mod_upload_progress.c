@@ -122,9 +122,6 @@ typedef struct {
     upload_progress_cache_t *cache;
 } ServerConfig;
 
-static const char* upload_progress_shared_memory_size_cmd(cmd_parms *cmd, void *dummy, const char *arg);
-static void upload_progress_child_init(apr_pool_t *p, server_rec *s);
-static int reportuploads_handler(request_rec *r);
 upload_progress_node_t* insert_node(request_rec *r, const char *key);
 upload_progress_node_t *store_node(ServerConfig *config, const char *key);
 upload_progress_node_t *find_node(request_rec *r, const char *key);
@@ -132,54 +129,13 @@ static void clean_old_connections(request_rec *r);
 void fill_new_upload_node_data(upload_progress_node_t *node, request_rec *r);
 static apr_status_t upload_progress_cleanup(void *data);
 const char *get_progress_id(request_rec *, int *);
-static const char *track_upload_progress_cmd(cmd_parms *cmd, void *dummy, int arg);
-static const char *report_upload_progress_cmd(cmd_parms *cmd, void *dummy, int arg);
-void *upload_progress_config_create_dir(apr_pool_t *p, char *dirspec);
-void *upload_progress_config_create_server(apr_pool_t *p, server_rec *s);
-static void upload_progress_register_hooks(apr_pool_t *p);
-static int upload_progress_handle_request(request_rec *r);
-static int track_upload_progress(ap_filter_t *f, apr_bucket_brigade *bb,
-        ap_input_mode_t mode, apr_read_type_e block,
-        apr_off_t readbytes);
-int upload_progress_init(apr_pool_t *, apr_pool_t *, apr_pool_t *, server_rec *);
 
 //from passenger
 typedef const char * (*CmdFunc)();// Workaround for some weird C++-specific compiler error.
 
+extern module AP_MODULE_DECLARE_DATA upload_progress_module;
+
 /**/server_rec *global_server = NULL;
-
-static const command_rec upload_progress_cmds[] =
-{
-    AP_INIT_FLAG("TrackUploads", (CmdFunc) track_upload_progress_cmd, NULL, OR_AUTHCFG,
-                 "Track upload progress in this location"),
-    AP_INIT_FLAG("ReportUploads", (CmdFunc) report_upload_progress_cmd, NULL, OR_AUTHCFG,
-                 "Report upload progress in this location"),
-    AP_INIT_TAKE1("UploadProgressSharedMemorySize", (CmdFunc) upload_progress_shared_memory_size_cmd, NULL, RSRC_CONF,
-                 "Size of shared memory used to keep uploads data, default 100KB"),
-    { NULL }
-};
-
-module AP_MODULE_DECLARE_DATA upload_progress_module =
-{
-    STANDARD20_MODULE_STUFF,
-    upload_progress_config_create_dir,
-    NULL,
-    upload_progress_config_create_server,
-    NULL,
-    upload_progress_cmds,
-    upload_progress_register_hooks,      /* callback for registering hooks */
-};
-
-static void upload_progress_register_hooks (apr_pool_t *p)
-{
-/**/up_log(APLOG_MARK, APLOG_DEBUG, 0, global_server, "upload_progress_register_hooks()");
-
-    ap_hook_fixups(upload_progress_handle_request, NULL, NULL, APR_HOOK_FIRST);
-    ap_hook_handler(reportuploads_handler, NULL, NULL, APR_HOOK_FIRST);
-    ap_hook_post_config(upload_progress_init, NULL, NULL, APR_HOOK_MIDDLE);
-    ap_hook_child_init(upload_progress_child_init, NULL, NULL, APR_HOOK_MIDDLE);
-    ap_register_input_filter("UPLOAD_PROGRESS", track_upload_progress, NULL, AP_FTYPE_RESOURCE);
-}
 
 inline ServerConfig *get_server_config(server_rec *s) {
     return (ServerConfig*)ap_get_module_config(s->module_config, &upload_progress_module);
@@ -192,7 +148,7 @@ static int upload_progress_handle_request(request_rec *r)
     DirConfig* dir = (DirConfig*)ap_get_module_config(r->per_dir_config, &upload_progress_module);
     ServerConfig *config = get_server_config(r->server);
 
-    if (dir && dir->track_enabled) {
+    if (dir && dir->track_enabled > 0) {
         if (r->method_number == M_POST) {
 
             int param_error;
@@ -249,21 +205,22 @@ static int upload_progress_handle_request(request_rec *r)
 static const char *report_upload_progress_cmd(cmd_parms *cmd, void *config, int arg)
 {
 /**/up_log(APLOG_MARK, APLOG_DEBUG, 0, global_server, "report_upload_progress_cmd()");
-    DirConfig* dir = (DirConfig *)config;
-    dir->report_enabled = arg;
+    DirConfig *dir = (DirConfig *)config;
+    dir->report_enabled = arg ? 1 : -1;
     return NULL;
 }
 
 static const char *track_upload_progress_cmd(cmd_parms *cmd, void *config, int arg)
 {
 /**/up_log(APLOG_MARK, APLOG_DEBUG, 0, global_server, "track_upload_progress_cmd()");
-    DirConfig* dir = (DirConfig *)config;
-    dir->track_enabled = arg;
+    DirConfig *dir = (DirConfig *)config;
+    dir->track_enabled = arg ? 1 : -1;
     return NULL;
 }
 
-static const char* upload_progress_shared_memory_size_cmd(cmd_parms *cmd, void *dummy,
-                                           const char *arg) {
+static const char* upload_progress_shared_memory_size_cmd(cmd_parms *cmd,
+                                                 void *dummy, const char *arg)
+{
 /**/up_log(APLOG_MARK, APLOG_DEBUG, 0, global_server, "upload_progress_shared_memory_size_cmd()");
     ServerConfig *config = get_server_config(cmd->server);
 
@@ -278,15 +235,29 @@ static const char* upload_progress_shared_memory_size_cmd(cmd_parms *cmd, void *
     return NULL;
 }
 
-void *upload_progress_config_create_dir(apr_pool_t *p, char *dirspec) {
+static void *create_upload_progress_dir_config(apr_pool_t *p, char *dirspec)
+{
 /**/up_log(APLOG_MARK, APLOG_DEBUG, 0, global_server, "upload_progress_config_create_dir()");
-    DirConfig* dir = (DirConfig *)apr_pcalloc(p, sizeof(DirConfig));
-    dir->report_enabled = 0;
+    DirConfig *dir = (DirConfig *)apr_pcalloc(p, sizeof(DirConfig));
     dir->track_enabled = 0;
+    dir->report_enabled = 0;
     return dir;
 }
 
-void *upload_progress_config_create_server(apr_pool_t *p, server_rec *s) {
+static void *merge_upload_progress_dir_config(apr_pool_t *p, void *basev, void *overridev)
+{
+    DirConfig *new = (DirConfig *)apr_pcalloc(p, sizeof(DirConfig));
+    DirConfig *override = (DirConfig *)overridev;
+    DirConfig *base = (DirConfig *)basev;
+    new->track_enabled = (override->track_enabled == 0) ? base->track_enabled :
+                             (override->track_enabled > 0 ? 1 : -1);
+    new->report_enabled = (override->report_enabled == 0) ? base->report_enabled :
+                              (override->report_enabled > 0 ? 1 : -1);
+    return new;
+}
+
+static void *upload_progress_config_create_server(apr_pool_t *p, server_rec *s)
+{
     up_log(APLOG_MARK, APLOG_DEBUG, 0, s, "upload_progress_config_create_server()");
     ServerConfig *config = (ServerConfig *)apr_pcalloc(p, sizeof(ServerConfig));
     config->cache_file = apr_pstrdup(p, CACHE_FILENAME);
@@ -692,7 +663,7 @@ static int reportuploads_handler(request_rec *r)
     char *response;
     DirConfig* dir = (DirConfig*)ap_get_module_config(r->per_dir_config, &upload_progress_module);
 
-    if(!dir->report_enabled) {
+    if (!dir || (dir->report_enabled <= 0)) {
         return DECLINED;
     }
     if (r->method_number != M_GET) {
@@ -808,3 +779,36 @@ static void upload_progress_child_init(apr_pool_t *p, server_rec *s)
                      st->lock_file, getpid());
     }
 }
+
+static const command_rec upload_progress_cmds[] =
+{
+    AP_INIT_FLAG("TrackUploads", (CmdFunc) track_upload_progress_cmd, NULL, OR_AUTHCFG,
+                 "Track upload progress in this location"),
+    AP_INIT_FLAG("ReportUploads", (CmdFunc) report_upload_progress_cmd, NULL, OR_AUTHCFG,
+                 "Report upload progress in this location"),
+    AP_INIT_TAKE1("UploadProgressSharedMemorySize", (CmdFunc) upload_progress_shared_memory_size_cmd, NULL, RSRC_CONF,
+                 "Size of shared memory used to keep uploads data, default 100KB"),
+    { NULL }
+};
+
+static void upload_progress_register_hooks (apr_pool_t *p)
+{
+/**/up_log(APLOG_MARK, APLOG_DEBUG, 0, global_server, "upload_progress_register_hooks()");
+
+    ap_hook_fixups(upload_progress_handle_request, NULL, NULL, APR_HOOK_FIRST);
+    ap_hook_handler(reportuploads_handler, NULL, NULL, APR_HOOK_FIRST);
+    ap_hook_post_config(upload_progress_init, NULL, NULL, APR_HOOK_MIDDLE);
+    ap_hook_child_init(upload_progress_child_init, NULL, NULL, APR_HOOK_MIDDLE);
+    ap_register_input_filter("UPLOAD_PROGRESS", track_upload_progress, NULL, AP_FTYPE_RESOURCE);
+}
+
+module AP_MODULE_DECLARE_DATA upload_progress_module =
+{
+    STANDARD20_MODULE_STUFF,
+    create_upload_progress_dir_config,
+    merge_upload_progress_dir_config,
+    upload_progress_config_create_server,
+    NULL,
+    upload_progress_cmds,
+    upload_progress_register_hooks,      /* callback for registering hooks */
+};
