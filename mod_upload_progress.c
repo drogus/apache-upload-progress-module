@@ -137,66 +137,74 @@ extern module AP_MODULE_DECLARE_DATA upload_progress_module;
 
 /**/server_rec *global_server = NULL;
 
-inline ServerConfig *get_server_config(server_rec *s) {
-    return (ServerConfig*)ap_get_module_config(s->module_config, &upload_progress_module);
+inline ServerConfig *get_server_config(server_rec *s)
+{
+    return (ServerConfig *)ap_get_module_config(s->module_config, &upload_progress_module);
+}
+
+inline DirConfig *get_dir_config(request_rec *r)
+{
+    return (DirConfig *)ap_get_module_config(r->per_dir_config, &upload_progress_module);
 }
 
 static int upload_progress_handle_request(request_rec *r)
 {
 /**/up_log(APLOG_MARK, APLOG_DEBUG, 0, r->server, "upload_progress_handle_request()");
 
-    DirConfig* dir = (DirConfig*)ap_get_module_config(r->per_dir_config, &upload_progress_module);
-    ServerConfig *config = get_server_config(r->server);
+    DirConfig *dir = get_dir_config(r);
+    ServerConfig *config = get_server_config(r->server); /* for CACHE_LOCK */
 
-    if (dir && dir->track_enabled > 0) {
-        if (r->method_number == M_POST) {
+    if (!dir || (dir->track_enabled <= 0)) {
+        return DECLINED;
+    }
+    if (r->method_number != M_POST) {
+        return DECLINED;
+    }
 
-            int param_error;
-            const char* id = get_progress_id(r, &param_error);
+    int param_error;
+    const char *id = get_progress_id(r, &param_error);
 
-            if (id) {
-                ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, r->server,
-                             "Upload Progress: Upload id='%s' in trackable location: %s.", id, r->uri);
-                CACHE_LOCK();
-                clean_old_connections(r);
-                upload_progress_node_t *node = find_node(r, id);
-                if (node == NULL) {
-                    node = insert_node(r, id);
-                    if (node)
-                        up_log(APLOG_MARK, APLOG_DEBUG, 0, r->server,
-                               "Upload Progress: Added upload with id='%s' to list.", id);
-                } else if (node->done) {
-                    fill_new_upload_node_data(node, r);
-                    up_log(APLOG_MARK, APLOG_DEBUG, 0, r->server,
-                                 "Upload Progress: Reused existing node with id='%s'.", id);
-                } else {
-                    node = NULL;
-                    ap_log_error(APLOG_MARK, APLOG_INFO, 0, r->server,
-                                 "Upload Progress: Upload with id='%s' already exists, ignoring.", id);
-                }
-
-                if (node) {
-                    upload_progress_context_t *ctx = (upload_progress_context_t*)apr_pcalloc(r->pool, sizeof(upload_progress_context_t));
-                    ctx->node = node;
-                    ctx->r = r;
-                    apr_pool_cleanup_register(r->pool, ctx, upload_progress_cleanup, apr_pool_cleanup_null);
-                    ap_add_input_filter("UPLOAD_PROGRESS", NULL, r, r->connection);
-                }
-                CACHE_UNLOCK();
-
-            } else if (param_error < 0) {
-                ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, r->server,
-                             "Upload Progress: Upload with invalid ID in trackable location: %s.", r->uri);
-                /*
-                return HTTP_BAD_REQUEST;
-                return HTTP_NOT_FOUND;
-                */
-
-            } else {
-                ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, r->server,
-                             "Upload Progress: Upload without ID in trackable location: %s.", r->uri);
-            }
+    if (id) {
+        ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, r->server,
+                     "Upload Progress: Upload id='%s' in trackable location: %s.", id, r->uri);
+        CACHE_LOCK();
+        clean_old_connections(r);
+        upload_progress_node_t *node = find_node(r, id);
+        if (node == NULL) {
+            node = insert_node(r, id);
+            if (node)
+                up_log(APLOG_MARK, APLOG_DEBUG, 0, r->server,
+                       "Upload Progress: Added upload with id='%s' to list.", id);
+        } else if (node->done) {
+            fill_new_upload_node_data(node, r);
+            up_log(APLOG_MARK, APLOG_DEBUG, 0, r->server,
+                         "Upload Progress: Reused existing node with id='%s'.", id);
+        } else {
+            node = NULL;
+            ap_log_error(APLOG_MARK, APLOG_INFO, 0, r->server,
+                         "Upload Progress: Upload with id='%s' already exists, ignoring.", id);
         }
+
+        if (node) {
+            upload_progress_context_t *ctx = (upload_progress_context_t*)apr_pcalloc(r->pool, sizeof(upload_progress_context_t));
+            ctx->node = node;
+            ctx->r = r;
+            apr_pool_cleanup_register(r->pool, ctx, upload_progress_cleanup, apr_pool_cleanup_null);
+            ap_add_input_filter("UPLOAD_PROGRESS", NULL, r, r->connection);
+        }
+        CACHE_UNLOCK();
+
+    } else if (param_error < 0) {
+        ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, r->server,
+                     "Upload Progress: Upload with invalid ID in trackable location: %s.", r->uri);
+        /*
+        return HTTP_BAD_REQUEST;
+        return HTTP_NOT_FOUND;
+        */
+
+    } else {
+        ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, r->server,
+                     "Upload Progress: Upload without ID in trackable location: %s.", r->uri);
     }
 
     return DECLINED;
@@ -661,7 +669,7 @@ static int reportuploads_handler(request_rec *r)
     time_t started_at=0;
     int done=0, err_status, found=0, param_error;
     char *response;
-    DirConfig* dir = (DirConfig*)ap_get_module_config(r->per_dir_config, &upload_progress_module);
+    DirConfig *dir = get_dir_config(r);
 
     if (!dir || (dir->report_enabled <= 0)) {
         return DECLINED;
