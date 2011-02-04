@@ -18,6 +18,10 @@
 #include <unistd.h>
 #endif
 
+#if (APR_MAJOR_VERSION < 1)
+#include "apr_shm_remove.h"
+#endif
+
 #ifndef PROGRESS_ID
 #  define PROGRESS_ID "X-Progress-ID"
 #endif
@@ -55,111 +59,6 @@
 #  define up_log(...) ap_log_error( __VA_ARGS__ )
 #else
 #  define up_log(...)
-#endif
-
-#if APR_HAS_SHARED_MEMORY
-/*
- * The following is a patch ported from mod_fcgid for Apache 2.0 releases
- * which don't provide a version of apr_shm_remove.
- *
- * Please have a look at the mod_fcgid mailing list for details.
- * The original patch can be found at:
- *     http://lists.freebsd.org/pipermail/freebsd-ports-bugs/2007-June/122731.html
- */
-/* BEGIN OF PATCH ---------------------------------------------------------- */
-/* apr version 0.x not support apr_shm_remove, I have to copy it from apr version 1.x */
-#if (APR_MAJOR_VERSION < 1)
-	#ifdef HAVE_SYS_MMAN_H
-		#include <sys/mman.h>
-	#endif
-	#ifdef HAVE_SYS_IPC_H
-		#include <sys/ipc.h>
-	#endif
-	#ifdef HAVE_SYS_MUTEX_H
-		#include <sys/mutex.h>
-	#endif
-	#ifdef HAVE_SYS_SHM_H
-		#include <sys/shm.h>
-	#endif
-	#if !defined(SHM_R)
-		#define SHM_R 0400
-	#endif
-	#if !defined(SHM_W)
-		#define SHM_W 0200
-	#endif
-	#ifdef HAVE_SYS_FILE_H
-		#include <sys/file.h>
-	#endif
-
-/* To avoid conflicts with mod_fcgid and that instance of the patch there.
- * This basically replaces each of our instances of apr_shm_remove with a local
- * identifier only used by us thus avoiding hard-to-find bugs if the wrong
- * version of this function gets linked in when loading the module.
- *
- * If re-using this patch you are therefore encouraged to change the name of
- * the resulting function in the makro and the function declaration below.
- */
-#define apr_shm_remove modup_backport_apr_shm_remove
-static apr_status_t modup_backport_apr_shm_remove(const char *filename, apr_pool_t * pool)
-{
-#if APR_USE_SHMEM_SHMGET
-    apr_status_t status;
-    apr_file_t *file;
-    key_t shmkey;
-    int shmid;
-#endif
-
-#if APR_USE_SHMEM_MMAP_TMP
-    return apr_file_remove(filename, pool);
-#endif
-
-#if APR_USE_SHMEM_MMAP_SHM
-    if (shm_unlink(filename) == -1) {
-        return errno;
-    }
-    return APR_SUCCESS;
-#endif
-
-#if APR_USE_SHMEM_SHMGET
-    /* Presume that the file already exists; just open for writing */
-    status = apr_file_open(&file, filename, APR_WRITE, APR_OS_DEFAULT, pool);
-    if (status) {
-        return status;
-    }
-
-    /* ftok() (on solaris at least) requires that the file actually
-     * exist before calling ftok(). */
-    shmkey = ftok(filename, 1);
-    if (shmkey == (key_t) - 1) {
-        goto shm_remove_failed;
-    }
-
-    apr_file_close(file);
-    if ((shmid = shmget(shmkey, 0, SHM_R | SHM_W)) < 0) {
-        goto shm_remove_failed;
-    }
-
-    /* Indicate that the segment is to be destroyed as soon
-     * as all processes have detached. This also disallows any
-     * new attachments to the segment. */
-    if (shmctl(shmid, IPC_RMID, NULL) == -1) {
-        goto shm_remove_failed;
-    }
-    return apr_file_remove(filename, pool);
-
-shm_remove_failed:
-    status = errno;
-    /* ensure the file has been removed anyway. */
-    apr_file_remove(filename, pool);
-    return status;
-#endif
-
-    /* No support for anonymous shm */
-    return APR_ENOTIMPL;
-}
-#endif /* APR_MAJOR_VERSION<1 */
-/* END OF PATCH ------------------------------------------------------------ */
-
 #endif
 
 #define CACHE_LOCK() do {                                  \
@@ -223,65 +122,20 @@ typedef struct {
     upload_progress_cache_t *cache;
 } ServerConfig;
 
-static const char* upload_progress_shared_memory_size_cmd(cmd_parms *cmd, void *dummy, const char *arg);
-static void upload_progress_child_init(apr_pool_t *p, server_rec *s);
-static int reportuploads_handler(request_rec *r);
 upload_progress_node_t* insert_node(request_rec *r, const char *key);
 upload_progress_node_t *store_node(ServerConfig *config, const char *key);
 upload_progress_node_t *find_node(request_rec *r, const char *key);
 static void clean_old_connections(request_rec *r);
 void fill_new_upload_node_data(upload_progress_node_t *node, request_rec *r);
 static apr_status_t upload_progress_cleanup(void *data);
-const char *get_progress_id(request_rec *r);
-int check_request_argument(char *value, char *allowed, int minlen, int maxlen);
-static const char *track_upload_progress_cmd(cmd_parms *cmd, void *dummy, int arg);
-static const char *report_upload_progress_cmd(cmd_parms *cmd, void *dummy, int arg);
-void *upload_progress_config_create_dir(apr_pool_t *p, char *dirspec);
-void *upload_progress_config_create_server(apr_pool_t *p, server_rec *s);
-static void upload_progress_register_hooks(apr_pool_t *p);
-static int upload_progress_handle_request(request_rec *r);
-static int track_upload_progress(ap_filter_t *f, apr_bucket_brigade *bb,
-        ap_input_mode_t mode, apr_read_type_e block,
-        apr_off_t readbytes);
-int upload_progress_init(apr_pool_t *, apr_pool_t *, apr_pool_t *, server_rec *);
+const char *get_progress_id(request_rec *, int *);
 
 //from passenger
 typedef const char * (*CmdFunc)();// Workaround for some weird C++-specific compiler error.
 
+extern module AP_MODULE_DECLARE_DATA upload_progress_module;
+
 /**/server_rec *global_server = NULL;
-
-static const command_rec upload_progress_cmds[] =
-{
-    AP_INIT_FLAG("TrackUploads", (CmdFunc) track_upload_progress_cmd, NULL, OR_AUTHCFG,
-                 "Track upload progress in this location"),
-    AP_INIT_FLAG("ReportUploads", (CmdFunc) report_upload_progress_cmd, NULL, OR_AUTHCFG,
-                 "Report upload progress in this location"),
-    AP_INIT_TAKE1("UploadProgressSharedMemorySize", (CmdFunc) upload_progress_shared_memory_size_cmd, NULL, RSRC_CONF,
-                 "Size of shared memory used to keep uploads data, default 100KB"),
-    { NULL }
-};
-
-module AP_MODULE_DECLARE_DATA upload_progress_module =
-{
-    STANDARD20_MODULE_STUFF,
-    upload_progress_config_create_dir,
-    NULL,
-    upload_progress_config_create_server,
-    NULL,
-    upload_progress_cmds,
-    upload_progress_register_hooks,      /* callback for registering hooks */
-};
-
-static void upload_progress_register_hooks (apr_pool_t *p)
-{
-/**/up_log(APLOG_MARK, APLOG_DEBUG, 0, global_server, "upload_progress_register_hooks()");
-
-    ap_hook_fixups(upload_progress_handle_request, NULL, NULL, APR_HOOK_FIRST);
-    ap_hook_handler(reportuploads_handler, NULL, NULL, APR_HOOK_FIRST);
-    ap_hook_post_config(upload_progress_init, NULL, NULL, APR_HOOK_MIDDLE);
-    ap_hook_child_init(upload_progress_child_init, NULL, NULL, APR_HOOK_MIDDLE);
-    ap_register_input_filter("UPLOAD_PROGRESS", track_upload_progress, NULL, AP_FTYPE_RESOURCE);
-}
 
 inline ServerConfig *get_server_config(server_rec *s) {
     return (ServerConfig*)ap_get_module_config(s->module_config, &upload_progress_module);
@@ -294,20 +148,15 @@ static int upload_progress_handle_request(request_rec *r)
     DirConfig* dir = (DirConfig*)ap_get_module_config(r->per_dir_config, &upload_progress_module);
     ServerConfig *config = get_server_config(r->server);
 
-    if (dir && dir->track_enabled) {
+    if (dir && dir->track_enabled > 0) {
         if (r->method_number == M_POST) {
-            ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, r->server,
-                         "Upload Progress: Upload in trackable location: %s.", r->uri);
 
-            const char* id = get_progress_id(r);
+            int param_error;
+            const char* id = get_progress_id(r, &param_error);
 
-            if (id != NULL) {
-                if ((intptr_t)id == ~(intptr_t)NULL)
-                    return HTTP_NOT_FOUND; //Also possible: HTTP_BAD_REQUEST to cancel or DECLINE to ignore such requests
-
-                up_log(APLOG_MARK, APLOG_DEBUG, 0, r->server,
-                             "Upload Progress: Progress id found: %s.", id);
-
+            if (id) {
+                ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, r->server,
+                             "Upload Progress: Upload id='%s' in trackable location: %s.", id, r->uri);
                 CACHE_LOCK();
                 clean_old_connections(r);
                 upload_progress_node_t *node = find_node(r, id);
@@ -315,13 +164,15 @@ static int upload_progress_handle_request(request_rec *r)
                     node = insert_node(r, id);
                     if (node)
                         up_log(APLOG_MARK, APLOG_DEBUG, 0, r->server,
-                                     "Upload Progress: Added upload with id=%s to list.", id);
+                               "Upload Progress: Added upload with id='%s' to list.", id);
                 } else if (node->done) {
                     fill_new_upload_node_data(node, r);
                     up_log(APLOG_MARK, APLOG_DEBUG, 0, r->server,
-                                 "Upload Progress: Reused existing node with id '%s'.", id);
+                                 "Upload Progress: Reused existing node with id='%s'.", id);
                 } else {
                     node = NULL;
+                    ap_log_error(APLOG_MARK, APLOG_INFO, 0, r->server,
+                                 "Upload Progress: Upload with id='%s' already exists, ignoring.", id);
                 }
 
                 if (node) {
@@ -332,6 +183,18 @@ static int upload_progress_handle_request(request_rec *r)
                     ap_add_input_filter("UPLOAD_PROGRESS", NULL, r, r->connection);
                 }
                 CACHE_UNLOCK();
+
+            } else if (param_error < 0) {
+                ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, r->server,
+                             "Upload Progress: Upload with invalid ID in trackable location: %s.", r->uri);
+                /*
+                return HTTP_BAD_REQUEST;
+                return HTTP_NOT_FOUND;
+                */
+
+            } else {
+                ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, r->server,
+                             "Upload Progress: Upload without ID in trackable location: %s.", r->uri);
             }
         }
     }
@@ -342,21 +205,22 @@ static int upload_progress_handle_request(request_rec *r)
 static const char *report_upload_progress_cmd(cmd_parms *cmd, void *config, int arg)
 {
 /**/up_log(APLOG_MARK, APLOG_DEBUG, 0, global_server, "report_upload_progress_cmd()");
-    DirConfig* dir = (DirConfig *)config;
-    dir->report_enabled = arg;
+    DirConfig *dir = (DirConfig *)config;
+    dir->report_enabled = arg ? 1 : -1;
     return NULL;
 }
 
 static const char *track_upload_progress_cmd(cmd_parms *cmd, void *config, int arg)
 {
 /**/up_log(APLOG_MARK, APLOG_DEBUG, 0, global_server, "track_upload_progress_cmd()");
-    DirConfig* dir = (DirConfig *)config;
-    dir->track_enabled = arg;
+    DirConfig *dir = (DirConfig *)config;
+    dir->track_enabled = arg ? 1 : -1;
     return NULL;
 }
 
-static const char* upload_progress_shared_memory_size_cmd(cmd_parms *cmd, void *dummy,
-                                           const char *arg) {
+static const char* upload_progress_shared_memory_size_cmd(cmd_parms *cmd,
+                                                 void *dummy, const char *arg)
+{
 /**/up_log(APLOG_MARK, APLOG_DEBUG, 0, global_server, "upload_progress_shared_memory_size_cmd()");
     ServerConfig *config = get_server_config(cmd->server);
 
@@ -371,15 +235,29 @@ static const char* upload_progress_shared_memory_size_cmd(cmd_parms *cmd, void *
     return NULL;
 }
 
-void *upload_progress_config_create_dir(apr_pool_t *p, char *dirspec) {
+static void *create_upload_progress_dir_config(apr_pool_t *p, char *dirspec)
+{
 /**/up_log(APLOG_MARK, APLOG_DEBUG, 0, global_server, "upload_progress_config_create_dir()");
-    DirConfig* dir = (DirConfig *)apr_pcalloc(p, sizeof(DirConfig));
-    dir->report_enabled = 0;
+    DirConfig *dir = (DirConfig *)apr_pcalloc(p, sizeof(DirConfig));
     dir->track_enabled = 0;
+    dir->report_enabled = 0;
     return dir;
 }
 
-void *upload_progress_config_create_server(apr_pool_t *p, server_rec *s) {
+static void *merge_upload_progress_dir_config(apr_pool_t *p, void *basev, void *overridev)
+{
+    DirConfig *new = (DirConfig *)apr_pcalloc(p, sizeof(DirConfig));
+    DirConfig *override = (DirConfig *)overridev;
+    DirConfig *base = (DirConfig *)basev;
+    new->track_enabled = (override->track_enabled == 0) ? base->track_enabled :
+                             (override->track_enabled > 0 ? 1 : -1);
+    new->report_enabled = (override->report_enabled == 0) ? base->report_enabled :
+                              (override->report_enabled > 0 ? 1 : -1);
+    return new;
+}
+
+static void *upload_progress_config_create_server(apr_pool_t *p, server_rec *s)
+{
     up_log(APLOG_MARK, APLOG_DEBUG, 0, s, "upload_progress_config_create_server()");
     ServerConfig *config = (ServerConfig *)apr_pcalloc(p, sizeof(ServerConfig));
     config->cache_file = apr_pstrdup(p, CACHE_FILENAME);
@@ -417,54 +295,44 @@ static int track_upload_progress(ap_filter_t *f, apr_bucket_brigade *bb,
 
     rv = ap_get_brigade(f->next, bb, mode, block, readbytes);
 
-    const char* id = get_progress_id(f->r);
-    if (id == NULL)
-        return rv;
-    if ((intptr_t)id == ~(intptr_t)NULL)
-        return HTTP_BAD_REQUEST; //Also possible: DECLINE to ignore such requests
+    int param_error;
+    const char* id = get_progress_id(f->r, &param_error);
+
+    if (id == NULL) return rv;
 
     CACHE_LOCK();
     node = find_node(f->r, id);
-    if (node != NULL) {
+    if (node) {
+        time_t t = time(NULL);
+        node->expires = t + 60;
         if (rv == APR_SUCCESS) {
             apr_off_t length;
             apr_brigade_length(bb, 1, &length);
             node->received += (apr_size_t)length;
             if (node->received > node->length) /* handle chunked tranfer */
                 node->length = node->received;
-            time_t upload_time = time(NULL) - node->started_at;
+            time_t upload_time = t - node->started_at;
             if (upload_time > 0) {
                 node->speed = (apr_size_t)(node->received / upload_time);
             }
+        } else {
+            node->err_status = read_request_status(f->r);
         }
-        node->err_status = read_request_status(f->r);
     }
     CACHE_UNLOCK();
 
     return rv;
 }
 
-int check_request_argument(char *value, char *allowed, int minlen, int maxlen) {
-    //Empty strings are valid if no minimal length required
-    if(!value) {
-        return !minlen;
-    }
-
-    //Check the length of the argument
-    if(strlen(value) > maxlen) {
-        return FALSE;
-    }
-    if(strlen(value) < minlen) {
-        return FALSE;
-    }
-
-    //If no whitelist given, assume everything whitelisted
-    if(!allowed) {
-        return TRUE;
-    }
-
-    //Check each char to be in the whitelist
-    return strlen(value) == strspn(value, allowed);
+int check_request_argument(const char *value, int len, char *allowed, int minlen, int maxlen) {
+    /* Check the length of the argument */
+    if (len > maxlen) return -1;
+    if (len < minlen) return -2;
+    /* If no whitelist given, assume everything whitelisted */
+    if (!allowed) return 0;
+    /* Check each char to be in the whitelist */
+    if (strspn(value, allowed) < len) return -3;
+    return 0;
 }
 
 char *get_param_value(char *p, const char *param_name, int *len) {
@@ -486,42 +354,44 @@ char *get_param_value(char *p, const char *param_name, int *len) {
     return p;
 }
 
-const char *get_progress_id(request_rec *r) {
-    char *val;
+const char *get_progress_id(request_rec *r, int *param_error) {
     int len;
 
-    //try to find progress id in headers
+    /* try to find progress id in http headers */
     const char *id  = apr_table_get(r->headers_in, PROGRESS_ID);
-
-    //if not found check args
-    if (id == NULL) {
-        val = get_param_value(r->args, PROGRESS_ID, &len);
-        if (val)
-            if(!check_request_argument(val, ARG_ALLOWED_PROGRESSID,
-                    ARG_MINLEN_PROGRESSID, ARG_MAXLEN_PROGRESSID)) {
-                return (char *)~(intptr_t)NULL; //Signal invalid parameter value
-            }
-
-            id = apr_pstrndup(r->connection->pool, val, len);
+    if (id) {
+        *param_error = check_request_argument(id, strlen(id), ARG_ALLOWED_PROGRESSID,
+            ARG_MINLEN_PROGRESSID, ARG_MAXLEN_PROGRESSID);
+        if (*param_error) return NULL;
+        return id;
     }
 
-    return id;
+    /* if progress id not found in headers, check request args (query string) */
+    id = get_param_value(r->args, PROGRESS_ID, &len);
+    if (id) {
+        *param_error = check_request_argument(id, len, ARG_ALLOWED_PROGRESSID,
+            ARG_MINLEN_PROGRESSID, ARG_MAXLEN_PROGRESSID);
+        if (*param_error) return NULL;
+        return apr_pstrndup(r->connection->pool, id, len);
+    }
+
+    *param_error = 1; /* not found */
+    return NULL;
 }
 
-const char *get_json_callback_param(request_rec *r) {
+const char *get_json_callback_param(request_rec *r, int *param_error) {
     char *val;
     int len;
 
     val = get_param_value(r->args, JSON_CB_PARAM, &len);
     if (val) {
-        if(!check_request_argument(val, ARG_ALLOWED_JSONPCALLBACK,
-                ARG_MINLEN_JSONPCALLBACK, ARG_MAXLEN_JSONPCALLBACK)) {
-            return (char *)~(intptr_t)NULL; //Signal invalid parameter value
-        }
-
+        *param_error = check_request_argument(val, len, ARG_ALLOWED_JSONPCALLBACK,
+            ARG_MINLEN_JSONPCALLBACK, ARG_MAXLEN_JSONPCALLBACK);
+        if (*param_error) return NULL;
         return apr_pstrndup(r->connection->pool, val, len);
     }
 
+    *param_error = 1; /* not found */
     return NULL;
 }
 
@@ -531,13 +401,14 @@ inline int check_node(upload_progress_node_t *node, const char *key) {
 
 void fill_new_upload_node_data(upload_progress_node_t *node, request_rec *r) {
     const char *content_length;
+    time_t t = time(NULL);
 
     node->received = 0;
     node->done = 0;
     node->err_status = 0;
-    node->started_at = time(NULL);
+    node->started_at = t;
     node->speed = 0;
-    node->expires = -1;
+    node->expires = t + 60;
     content_length = apr_table_get(r->headers_in, "Content-Length");
     node->length = 1;
     /* Content-Length is missing is case of chunked transfer encoding */
@@ -616,7 +487,7 @@ static void clean_old_connections(request_rec *r) {
 
     for (i = 0; i < cache->active; i++) {
         node = &nodes[list[i]];
-        if (t > node->expires && node->done == 1 && node->expires != -1) {
+        if (t > node->expires) {
             cache->active -= 1;
             tmp = list[cache->active];
             list[cache->active] = list[i];
@@ -624,13 +495,6 @@ static void clean_old_connections(request_rec *r) {
             i--;
         }
     }
-}
-
-static apr_status_t upload_progress_cache_module_kill(void *data)
-{
-/**/up_log(APLOG_MARK, APLOG_DEBUG, 0, global_server, "upload_progress_cache_module_kill()");
-
-    return APR_SUCCESS;
 }
 
 void *rmm_calloc(apr_rmm_t *rmm, apr_size_t reqsize)
@@ -670,8 +534,6 @@ apr_status_t upload_progress_cache_init(apr_pool_t *pool, ServerConfig *config)
         return result;
     }
 
-    apr_pool_cleanup_register(config->pool, config , upload_progress_cache_module_kill, apr_pool_cleanup_null);
-
     /* init cache object */
     cache = (upload_progress_cache_t *)rmm_calloc(config->cache_rmm,
                                         sizeof(upload_progress_cache_t));
@@ -692,7 +554,8 @@ apr_status_t upload_progress_cache_init(apr_pool_t *pool, ServerConfig *config)
     if (!cache->nodes) return APR_ENOMEM;
 
     ap_log_error(APLOG_MARK, APLOG_INFO, 0, global_server,
-                 "Upload Progress: monitoring %i simultaneous uploads", nodes_cnt);
+                 "Upload Progress: monitoring max %i simultaneous uploads, id (%s) length %i..%i",
+                 nodes_cnt, PROGRESS_ID, ARG_MINLEN_PROGRESSID, ARG_MAXLEN_PROGRESSID);
 
     return APR_SUCCESS;
 }
@@ -796,11 +659,11 @@ static int reportuploads_handler(request_rec *r)
 
     apr_size_t length, received, speed;
     time_t started_at=0;
-    int done=0, err_status, found=0;
+    int done=0, err_status, found=0, param_error;
     char *response;
     DirConfig* dir = (DirConfig*)ap_get_module_config(r->per_dir_config, &upload_progress_module);
 
-    if(!dir->report_enabled) {
+    if (!dir || (dir->report_enabled <= 0)) {
         return DECLINED;
     }
     if (r->method_number != M_GET) {
@@ -808,20 +671,22 @@ static int reportuploads_handler(request_rec *r)
     }
 
     /* get the tracking id if any */
-    const char *id = get_progress_id(r);
+    const char *id = get_progress_id(r, &param_error);
 
     if (id == NULL) {
-        ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, r->server,
-                     "Upload Progress: Report requested without id. uri=%s", r->uri);
-        return HTTP_NOT_FOUND;
-    } else if ((intptr_t)id == ~(intptr_t)NULL) {
-        ap_log_error(APLOG_MARK, APLOG_INFO, 0, r->server,
-                     "Upload Progress: Report requested for invalid id. uri=%s", r->uri);
-        return HTTP_NOT_FOUND;
-    } else {
-        ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, r->server,
-                     "Upload Progress: Report requested with id=%s. uri=%s", id, r->uri);
+        if (param_error < 0) {
+            ap_log_error(APLOG_MARK, APLOG_INFO, 0, r->server,
+                         "Upload Progress: Report requested with invalid id. uri=%s", r->uri);
+            return HTTP_BAD_REQUEST;
+        } else {
+            ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, r->server,
+                         "Upload Progress: Report requested without id. uri=%s", r->uri);
+            return HTTP_NOT_FOUND;
+        }
     }
+
+    ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, r->server,
+                 "Upload Progress: Report requested with id='%s'. uri=%s", id, r->uri);
 
     ServerConfig *config = get_server_config(r->server);
 
@@ -871,7 +736,13 @@ static int reportuploads_handler(request_rec *r)
     char *completed_response;
 
     /* get the jsonp callback if any */
-    const char *jsonp = get_json_callback_param(r);
+    const char *jsonp = get_json_callback_param(r, &param_error);
+
+    if (param_error < 0) {
+        ap_log_error(APLOG_MARK, APLOG_INFO, 0, r->server,
+                     "Upload Progress: Report requested with invalid JSON-P callback. uri=%s", r->uri);
+        return HTTP_BAD_REQUEST;
+    }
 
     up_log(APLOG_MARK, APLOG_DEBUG, 0, r->server,
                        "Upload Progress: JSON-P callback: %s.", jsonp);
@@ -908,3 +779,36 @@ static void upload_progress_child_init(apr_pool_t *p, server_rec *s)
                      st->lock_file, getpid());
     }
 }
+
+static const command_rec upload_progress_cmds[] =
+{
+    AP_INIT_FLAG("TrackUploads", (CmdFunc) track_upload_progress_cmd, NULL, OR_AUTHCFG,
+                 "Track upload progress in this location"),
+    AP_INIT_FLAG("ReportUploads", (CmdFunc) report_upload_progress_cmd, NULL, OR_AUTHCFG,
+                 "Report upload progress in this location"),
+    AP_INIT_TAKE1("UploadProgressSharedMemorySize", (CmdFunc) upload_progress_shared_memory_size_cmd, NULL, RSRC_CONF,
+                 "Size of shared memory used to keep uploads data, default 100KB"),
+    { NULL }
+};
+
+static void upload_progress_register_hooks (apr_pool_t *p)
+{
+/**/up_log(APLOG_MARK, APLOG_DEBUG, 0, global_server, "upload_progress_register_hooks()");
+
+    ap_hook_fixups(upload_progress_handle_request, NULL, NULL, APR_HOOK_FIRST);
+    ap_hook_handler(reportuploads_handler, NULL, NULL, APR_HOOK_FIRST);
+    ap_hook_post_config(upload_progress_init, NULL, NULL, APR_HOOK_MIDDLE);
+    ap_hook_child_init(upload_progress_child_init, NULL, NULL, APR_HOOK_MIDDLE);
+    ap_register_input_filter("UPLOAD_PROGRESS", track_upload_progress, NULL, AP_FTYPE_RESOURCE);
+}
+
+module AP_MODULE_DECLARE_DATA upload_progress_module =
+{
+    STANDARD20_MODULE_STUFF,
+    create_upload_progress_dir_config,
+    merge_upload_progress_dir_config,
+    upload_progress_config_create_server,
+    NULL,
+    upload_progress_cmds,
+    upload_progress_register_hooks,      /* callback for registering hooks */
+};
