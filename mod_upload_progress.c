@@ -703,7 +703,7 @@ static int reportuploads_handler(request_rec *r)
         done = node->done;
         speed = node->speed;
         started_at = node->started_at;
-        finished_at = node->started_at;
+        finished_at = node->finished_at;
         err_status = node->err_status;
         found = 1;
     } else {
