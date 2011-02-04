@@ -92,6 +92,7 @@ typedef struct upload_progress_node_s{
     apr_size_t received;
     int err_status;
     time_t started_at;
+    time_t finished_at;
     apr_size_t speed; /* bytes per second */
     time_t expires;
     int done;
@@ -305,6 +306,7 @@ static int track_upload_progress(ap_filter_t *f, apr_bucket_brigade *bb,
     if (node) {
         time_t t = time(NULL);
         node->expires = t + 60;
+        node->finished_at = t;
         if (rv == APR_SUCCESS) {
             apr_off_t length;
             apr_brigade_length(bb, 1, &length);
@@ -407,6 +409,7 @@ void fill_new_upload_node_data(upload_progress_node_t *node, request_rec *r) {
     node->done = 0;
     node->err_status = 0;
     node->started_at = t;
+    node->finished_at = t;
     node->speed = 0;
     node->expires = t + 60;
     content_length = apr_table_get(r->headers_in, "Content-Length");
@@ -658,7 +661,7 @@ static int reportuploads_handler(request_rec *r)
 /**/up_log(APLOG_MARK, APLOG_DEBUG, 0, r->server, "reportuploads_handler()");
 
     apr_size_t length, received, speed;
-    time_t started_at=0;
+    time_t started_at=0, finished_at=0;
     int done=0, err_status, found=0, param_error;
     char *response;
     DirConfig* dir = (DirConfig*)ap_get_module_config(r->per_dir_config, &upload_progress_module);
@@ -700,6 +703,7 @@ static int reportuploads_handler(request_rec *r)
         done = node->done;
         speed = node->speed;
         started_at = node->started_at;
+        finished_at = node->started_at;
         err_status = node->err_status;
         found = 1;
     } else {
@@ -726,11 +730,21 @@ static int reportuploads_handler(request_rec *r)
     } else if (err_status >= HTTP_BAD_REQUEST  ) {
         response = apr_psprintf(r->pool, "{ \"state\" : \"error\", \"status\" : %d, \"uuid\" : \"%s\" }", err_status, id);
     } else if (done) {
-        response = apr_psprintf(r->pool, "{ \"state\" : \"done\", \"size\" : %d, \"speed\" : %d, \"started_at\": %d, \"uuid\" : \"%s\" }", length, speed, started_at, id);
+        response = apr_psprintf(r->pool, "{ \"state\" : \"done\", \"size\" : %d, \"speed\" : %d, \"started_at\": %d, \"completed_at\": %d, \"uuid\" : \"%s\" }", length, speed, started_at, finished_at, id);
     } else if ( length == 0 && received == 0 ) {
         response = apr_psprintf(r->pool, "{ \"state\" : \"starting\", \"uuid\" : \"%s\" }", id);
     } else {
-        response = apr_psprintf(r->pool, "{ \"state\" : \"uploading\", \"received\" : %d, \"size\" : %d, \"speed\" : %d, \"started_at\": %d, \"uuid\" : \"%s\" }", received, length, speed, started_at, id);
+        /* finished_at contains the time of the last change to the node.
+         * To get the ETA for this upload, we have to calculate.
+         * But since we need the speed for this we have to check first.
+         * If we can't predict, let's assume we'll finish in the next second.
+         */
+        if((finished_at != started_at) && speed) {
+            finished_at = length / speed + started_at;
+        } else {
+            finished_at = started_at + 1;
+        }
+        response = apr_psprintf(r->pool, "{ \"state\" : \"uploading\", \"received\" : %d, \"size\" : %d, \"speed\" : %d, \"started_at\": %d, \"eta\": %d, \"uuid\" : \"%s\" }", received, length, speed, started_at, finished_at, id);
     }
 
     char *completed_response;
