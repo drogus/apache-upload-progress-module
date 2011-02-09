@@ -112,7 +112,6 @@ typedef struct {
 
 typedef struct {
     server_rec *server;
-    apr_pool_t *pool;
     apr_global_mutex_t *cache_lock;
     char *lock_file;           /* filename for shm lock mutex */
     apr_size_t cache_bytes;
@@ -270,7 +269,6 @@ static void *upload_progress_config_create_server(apr_pool_t *p, server_rec *s)
     ServerConfig *config = (ServerConfig *)apr_pcalloc(p, sizeof(ServerConfig));
     config->cache_file = apr_pstrdup(p, CACHE_FILENAME);
     config->cache_bytes = 51200;
-    apr_pool_create(&config->pool, p);
     config->server = s;
     return config;
 }
@@ -522,11 +520,11 @@ apr_status_t upload_progress_cache_init(apr_pool_t *pool, ServerConfig *config)
 
     if (config->cache_file) {
         /* Remove any existing shm segment with this name. */
-        apr_shm_remove(config->cache_file, config->pool);
+        apr_shm_remove(config->cache_file, pool);
     }
 
     size = APR_ALIGN_DEFAULT(config->cache_bytes);
-    result = apr_shm_create(&config->cache_shm, size, config->cache_file, config->pool);
+    result = apr_shm_create(&config->cache_shm, size, config->cache_file, pool);
     if (result != APR_SUCCESS) {
         return result;
     }
@@ -537,7 +535,7 @@ apr_status_t upload_progress_cache_init(apr_pool_t *pool, ServerConfig *config)
     /* This will create a rmm "handler" to get into the shared memory area */
     result = apr_rmm_init(&config->cache_rmm, NULL,
                           apr_shm_baseaddr_get(config->cache_shm), size,
-                          config->pool);
+                          pool);
     if (result != APR_SUCCESS) {
         return result;
     }
@@ -614,13 +612,13 @@ int upload_progress_init(apr_pool_t *p, apr_pool_t *plog,
         }
 
         if (config->cache_file) {
-            config->lock_file = apr_pstrcat(config->pool, config->cache_file, ".lck",
+            config->lock_file = apr_pstrcat(p, config->cache_file, ".lck",
                                         NULL);
         }
 
         result = apr_global_mutex_create(&config->cache_lock,
                                          config->lock_file, APR_LOCK_DEFAULT,
-                                         config->pool);
+                                         p);
         if (result != APR_SUCCESS) {
             return result;
         }
