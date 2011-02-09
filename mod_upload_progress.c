@@ -596,6 +596,7 @@ int upload_progress_init(apr_pool_t *p, apr_pool_t *plog,
         if (config->cache_file) {
             char *lck_file = apr_pstrcat(ptemp, config->cache_file, ".lck",
                                          NULL);
+            up_log(APLOG_MARK, APLOG_DEBUG, 0, s, "Upload Progress: Remove lock file");
             apr_file_remove(lck_file, ptemp);
         }
         return OK;
