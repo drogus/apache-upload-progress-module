@@ -722,7 +722,7 @@ static int reportuploads_handler(request_rec *r)
      * request in error:        err_status >= NGX_HTTP_SPECIAL_RESPONSE
      * request finished:        done = true
      * request not yet started but registered:        length==0 && rest ==0
-     * reauest in progress:     rest > 0
+     * request in progress:     rest > 0
      */
 
     if (!found) {
