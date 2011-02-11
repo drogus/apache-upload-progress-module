@@ -197,6 +197,9 @@ static int upload_progress_handle_request(request_rec *r)
                 ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, r->server,
                              "Upload Progress: Upload without ID in trackable location: %s.", r->uri);
             }
+        } else {
+            up_log(APLOG_MARK, APLOG_DEBUG, 0, r->server,
+                         "Upload Progress: Non-POST request in trackable location: %s.", r->uri);
         }
     }
 
