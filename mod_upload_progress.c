@@ -154,6 +154,8 @@ static int upload_progress_handle_request(request_rec *r)
         return DECLINED;
     }
     if (r->method_number != M_POST) {
+        ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, server,
+                     "Upload Progress: Non-POST request in trackable location: %s.", r->uri);
         return DECLINED;
     }
 
