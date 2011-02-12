@@ -242,16 +242,16 @@ static const char* upload_progress_shared_memory_size_cmd(cmd_parms *cmd,
     return NULL;
 }
 
-static void *create_upload_progress_dir_config(apr_pool_t *p, char *dirspec)
+static void *upload_progress_create_dir_config(apr_pool_t *p, char *dirspec)
 {
-/**/up_log(APLOG_MARK, APLOG_DEBUG, 0, global_server, "upload_progress_config_create_dir()");
+/**/up_log(APLOG_MARK, APLOG_DEBUG, 0, global_server, "upload_progress_create_dir_config()");
     DirConfig *dir = (DirConfig *)apr_pcalloc(p, sizeof(DirConfig));
     dir->track_enabled = 0;
     dir->report_enabled = 0;
     return dir;
 }
 
-static void *merge_upload_progress_dir_config(apr_pool_t *p, void *basev, void *overridev)
+static void *upload_progress_merge_dir_config(apr_pool_t *p, void *basev, void *overridev)
 {
     DirConfig *new = (DirConfig *)apr_pcalloc(p, sizeof(DirConfig));
     DirConfig *override = (DirConfig *)overridev;
@@ -263,14 +263,20 @@ static void *merge_upload_progress_dir_config(apr_pool_t *p, void *basev, void *
     return new;
 }
 
-static void *upload_progress_config_create_server(apr_pool_t *p, server_rec *s)
+static void *upload_progress_create_server_config(apr_pool_t *p, server_rec *s)
 {
-    up_log(APLOG_MARK, APLOG_DEBUG, 0, s, "upload_progress_config_create_server()");
+/**/up_log(APLOG_MARK, APLOG_DEBUG, 0, s, "upload_progress_create_server_config()");
     ServerConfig *config = (ServerConfig *)apr_pcalloc(p, sizeof(ServerConfig));
     config->cache_file = apr_pstrdup(p, CACHE_FILENAME);
     config->cache_bytes = 51200;
     config->server = s;
     return config;
+}
+
+static void *upload_progress_merge_server_config(apr_pool_t *p, void *basev,
+                                    void *overridesv)
+{
+    return basev;
 }
 
 int read_request_status(request_rec *r)
@@ -632,25 +638,6 @@ int upload_progress_init(apr_pool_t *p, apr_pool_t *plog,
         }
 #endif
 
-        /* merge config in all vhost */
-        s_vhost = s->next;
-        while (s_vhost) {
-            st_vhost = get_server_config(s_vhost);
-
-            st_vhost->cache_shm = config->cache_shm;
-            st_vhost->cache_rmm = config->cache_rmm;
-            st_vhost->cache_file = config->cache_file;
-            st_vhost->cache = config->cache;
-            up_log(APLOG_MARK, APLOG_DEBUG, result, s,
-                         "Upload Progress: merging Shared Cache conf: shm=0x%pp rmm=0x%pp "
-                         "for VHOST: %s", config->cache_shm, config->cache_rmm,
-                         s_vhost->server_hostname);
-
-            st_vhost->cache_lock = config->cache_lock;
-            st_vhost->lock_file = config->lock_file;
-            s_vhost = s_vhost->next;
-        }
-
     } else {
         ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, s,
                      "Upload Progress cache: cache size is zero, disabling "
@@ -812,10 +799,10 @@ static void upload_progress_register_hooks (apr_pool_t *p)
 module AP_MODULE_DECLARE_DATA upload_progress_module =
 {
     STANDARD20_MODULE_STUFF,
-    create_upload_progress_dir_config,
-    merge_upload_progress_dir_config,
-    upload_progress_config_create_server,
-    NULL,
+    upload_progress_create_dir_config,
+    upload_progress_merge_dir_config,
+    upload_progress_create_server_config,
+    upload_progress_merge_server_config,
     upload_progress_cmds,
     upload_progress_register_hooks,      /* callback for registering hooks */
 };
