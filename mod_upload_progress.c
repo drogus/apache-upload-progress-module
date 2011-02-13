@@ -64,7 +64,7 @@
 #define CACHE_LOCK() do {                                  \
     if (config->cache_lock) {                              \
         char errbuf[200];                                  \
-        up_log(APLOG_MARK, APLOG_DEBUG, 0, config->server, "CACHE_LOCK()"); \
+        up_log(APLOG_MARK, APLOG_DEBUG, 0, server, "CACHE_LOCK()"); \
         apr_status_t status = apr_global_mutex_lock(config->cache_lock);        \
         if (status != APR_SUCCESS) {                          \
             ap_log_error(APLOG_MARK, APLOG_CRIT, status, 0, \
@@ -76,7 +76,7 @@
 #define CACHE_UNLOCK() do {                                \
     if (config->cache_lock)                               \
     {	\
-        up_log(APLOG_MARK, APLOG_DEBUG, 0, config->server, "CACHE_UNLOCK()"); \
+        up_log(APLOG_MARK, APLOG_DEBUG, 0, server, "CACHE_UNLOCK()"); \
         apr_global_mutex_unlock(config->cache_lock);      \
     }	\
 } while (0)
@@ -111,7 +111,6 @@ typedef struct {
 } upload_progress_context_t;
 
 typedef struct {
-    server_rec *server;
     apr_global_mutex_t *cache_lock;
     char *lock_file;           /* filename for shm lock mutex */
     apr_size_t cache_bytes;
@@ -148,10 +147,11 @@ inline DirConfig *get_dir_config(request_rec *r)
 
 static int upload_progress_handle_request(request_rec *r)
 {
-/**/up_log(APLOG_MARK, APLOG_DEBUG, 0, r->server, "upload_progress_handle_request()");
+    server_rec *server = r->server;
+/**/up_log(APLOG_MARK, APLOG_DEBUG, 0, server, "upload_progress_handle_request()");
 
     DirConfig *dir = get_dir_config(r);
-    ServerConfig *config = get_server_config(r->server); /* for CACHE_LOCK */
+    ServerConfig *config = get_server_config(server); /* for CACHE_LOCK */
 
     if (!dir || (dir->track_enabled <= 0)) {
         return DECLINED;
@@ -164,7 +164,7 @@ static int upload_progress_handle_request(request_rec *r)
     const char *id = get_progress_id(r, &param_error);
 
     if (id) {
-        ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, r->server,
+        ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, server,
                      "Upload Progress: Upload id='%s' in trackable location: %s.", id, r->uri);
         CACHE_LOCK();
         clean_old_connections(r);
@@ -172,15 +172,15 @@ static int upload_progress_handle_request(request_rec *r)
         if (node == NULL) {
             node = insert_node(r, id);
             if (node)
-                up_log(APLOG_MARK, APLOG_DEBUG, 0, r->server,
+                up_log(APLOG_MARK, APLOG_DEBUG, 0, server,
                        "Upload Progress: Added upload with id='%s' to list.", id);
         } else if (node->done) {
             fill_new_upload_node_data(node, r);
-            up_log(APLOG_MARK, APLOG_DEBUG, 0, r->server,
+            up_log(APLOG_MARK, APLOG_DEBUG, 0, server,
                          "Upload Progress: Reused existing node with id='%s'.", id);
         } else {
             node = NULL;
-            ap_log_error(APLOG_MARK, APLOG_INFO, 0, r->server,
+            ap_log_error(APLOG_MARK, APLOG_INFO, 0, server,
                          "Upload Progress: Upload with id='%s' already exists, ignoring.", id);
         }
 
@@ -194,7 +194,7 @@ static int upload_progress_handle_request(request_rec *r)
         CACHE_UNLOCK();
 
     } else if (param_error < 0) {
-        ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, r->server,
+        ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, server,
                      "Upload Progress: Upload with invalid ID in trackable location: %s.", r->uri);
         /*
         return HTTP_BAD_REQUEST;
@@ -202,7 +202,7 @@ static int upload_progress_handle_request(request_rec *r)
         */
 
     } else {
-        ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, r->server,
+        ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, server,
                      "Upload Progress: Upload without ID in trackable location: %s.", r->uri);
     }
 
@@ -265,11 +265,11 @@ static void *upload_progress_merge_dir_config(apr_pool_t *p, void *basev, void *
 
 static void *upload_progress_create_server_config(apr_pool_t *p, server_rec *s)
 {
-/**/up_log(APLOG_MARK, APLOG_DEBUG, 0, s, "upload_progress_create_server_config()");
+    if (!global_server) global_server = s;
+/**/up_log(APLOG_MARK, APLOG_DEBUG, 0, global_server, "upload_progress_create_server_config()");
     ServerConfig *config = (ServerConfig *)apr_pcalloc(p, sizeof(ServerConfig));
     config->cache_file = apr_pstrdup(p, CACHE_FILENAME);
     config->cache_bytes = 51200;
-    config->server = s;
     return config;
 }
 
@@ -303,7 +303,8 @@ static int track_upload_progress(ap_filter_t *f, apr_bucket_brigade *bb,
 /**/up_log(APLOG_MARK, APLOG_DEBUG, 0, global_server, "track_upload_progress()");
     apr_status_t rv;
     upload_progress_node_t *node;
-    ServerConfig* config = get_server_config(f->r->server);
+    server_rec *server = f->r->server;
+    ServerConfig* config = get_server_config(server);
 
     rv = ap_get_brigade(f->next, bb, mode, block, readbytes);
 
@@ -576,7 +577,6 @@ int upload_progress_init(apr_pool_t *p, apr_pool_t *plog,
                     apr_pool_t *ptemp,
                     server_rec *s) {
 /**/up_log(APLOG_MARK, APLOG_DEBUG, 0, s, "upload_progress_init()");
-/**/global_server = s;
 
     apr_status_t result;
     server_rec *s_vhost;
@@ -649,7 +649,8 @@ int upload_progress_init(apr_pool_t *p, apr_pool_t *plog,
 
 static int reportuploads_handler(request_rec *r)
 { 
-/**/up_log(APLOG_MARK, APLOG_DEBUG, 0, r->server, "reportuploads_handler()");
+    server_rec *server = r->server;
+/**/up_log(APLOG_MARK, APLOG_DEBUG, 0, server, "reportuploads_handler()");
 
     apr_size_t length, received, speed;
     time_t started_at=0;
@@ -669,25 +670,25 @@ static int reportuploads_handler(request_rec *r)
 
     if (id == NULL) {
         if (param_error < 0) {
-            ap_log_error(APLOG_MARK, APLOG_INFO, 0, r->server,
+            ap_log_error(APLOG_MARK, APLOG_INFO, 0, server,
                          "Upload Progress: Report requested with invalid id. uri=%s", r->uri);
             return HTTP_BAD_REQUEST;
         } else {
-            ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, r->server,
+            ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, server,
                          "Upload Progress: Report requested without id. uri=%s", r->uri);
             return HTTP_NOT_FOUND;
         }
     }
 
-    ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, r->server,
+    ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, server,
                  "Upload Progress: Report requested with id='%s'. uri=%s", id, r->uri);
 
-    ServerConfig *config = get_server_config(r->server);
+    ServerConfig *config = get_server_config(server);
 
     CACHE_LOCK();
     upload_progress_node_t *node = find_node(r, id);
     if (node != NULL) {
-        up_log(APLOG_MARK, APLOG_DEBUG, 0, r->server,
+        up_log(APLOG_MARK, APLOG_DEBUG, 0, server,
                      "Node with id=%s found for report", id);
         received = node->received;
         length = node->length;
@@ -697,7 +698,7 @@ static int reportuploads_handler(request_rec *r)
         err_status = node->err_status;
         found = 1;
     } else {
-        up_log(APLOG_MARK, APLOG_DEBUG, 0, r->server,
+        up_log(APLOG_MARK, APLOG_DEBUG, 0, server,
                      "Node with id=%s not found for report", id);
     }
     CACHE_UNLOCK();
@@ -733,12 +734,12 @@ static int reportuploads_handler(request_rec *r)
     const char *jsonp = get_json_callback_param(r, &param_error);
 
     if (param_error < 0) {
-        ap_log_error(APLOG_MARK, APLOG_INFO, 0, r->server,
+        ap_log_error(APLOG_MARK, APLOG_INFO, 0, server,
                      "Upload Progress: Report requested with invalid JSON-P callback. uri=%s", r->uri);
         return HTTP_BAD_REQUEST;
     }
 
-    up_log(APLOG_MARK, APLOG_DEBUG, 0, r->server,
+    up_log(APLOG_MARK, APLOG_DEBUG, 0, server,
                        "Upload Progress: JSON-P callback: %s.", jsonp);
 
     // fix up response for jsonp request, if needed
