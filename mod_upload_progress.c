@@ -55,6 +55,14 @@
 #  define ARG_MAXLEN_JSONPCALLBACK 64
 #endif
 
+/**
+ * This macro is not present in Apache HTTP server version 2.2.3 
+ * Red-Hat 5 / CentOS 5
+ */
+#ifndef ap_is_HTTP_VALID_RESPONSE
+#  define ap_is_HTTP_VALID_RESPONSE(x) (((x) >= 100)&&((x) < 600))
+#endif
+
 #if UP_DEBUG == 1
 #  define up_log(...) ap_log_error( __VA_ARGS__ )
 #else
@@ -88,8 +96,8 @@ typedef struct {
 
 
 typedef struct upload_progress_node_s{
-    apr_size_t length;
-    apr_size_t received;
+    long long length;
+    long long received;
     int err_status;
     time_t started_at;
     apr_size_t speed; /* bytes per second */
@@ -413,7 +421,7 @@ void fill_new_upload_node_data(upload_progress_node_t *node, request_rec *r) {
     node->length = 1;
     /* Content-Length is missing is case of chunked transfer encoding */
     if (content_length)
-        sscanf(content_length, "%d", &(node->length));
+        sscanf(content_length, "%llu", &(node->length));
 }
 
 upload_progress_node_t* insert_node(request_rec *r, const char *key) {
@@ -657,7 +665,8 @@ static int reportuploads_handler(request_rec *r)
 { 
 /**/up_log(APLOG_MARK, APLOG_DEBUG, 0, r->server, "reportuploads_handler()");
 
-    apr_size_t length, received, speed;
+    long long length, received;
+    apr_size_t speed;
     time_t started_at=0;
     int done=0, err_status, found=0, param_error;
     char *response;
@@ -726,11 +735,11 @@ static int reportuploads_handler(request_rec *r)
     } else if (err_status >= HTTP_BAD_REQUEST  ) {
         response = apr_psprintf(r->pool, "{ \"state\" : \"error\", \"status\" : %d, \"uuid\" : \"%s\" }", err_status, id);
     } else if (done) {
-        response = apr_psprintf(r->pool, "{ \"state\" : \"done\", \"size\" : %d, \"speed\" : %d, \"started_at\": %d, \"uuid\" : \"%s\" }", length, speed, started_at, id);
+        response = apr_psprintf(r->pool, "{ \"state\" : \"done\", \"size\" : %llu, \"speed\" : %d, \"started_at\": %d, \"uuid\" : \"%s\" }", length, speed, started_at, id);
     } else if ( length == 0 && received == 0 ) {
         response = apr_psprintf(r->pool, "{ \"state\" : \"starting\", \"uuid\" : \"%s\" }", id);
     } else {
-        response = apr_psprintf(r->pool, "{ \"state\" : \"uploading\", \"received\" : %d, \"size\" : %d, \"speed\" : %d, \"started_at\": %d, \"uuid\" : \"%s\" }", received, length, speed, started_at, id);
+        response = apr_psprintf(r->pool, "{ \"state\" : \"uploading\", \"received\" : %llu, \"size\" : %llu, \"speed\" : %d, \"started_at\": %d, \"uuid\" : \"%s\" }", received, length, speed, started_at, id);
     }
 
     char *completed_response;
