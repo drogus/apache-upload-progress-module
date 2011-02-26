@@ -579,8 +579,6 @@ int upload_progress_init(apr_pool_t *p, apr_pool_t *plog,
 /**/up_log(APLOG_MARK, APLOG_DEBUG, 0, s, "upload_progress_init()");
 
     apr_status_t result;
-    server_rec *s_vhost;
-    ServerConfig *st_vhost;
 
     ServerConfig *config = get_server_config(s);
 
@@ -758,20 +756,19 @@ static void upload_progress_child_init(apr_pool_t *p, server_rec *s)
 {
 /**/up_log(APLOG_MARK, APLOG_DEBUG, 0, s, "upload_progress_child_init()");
 
-    apr_status_t sts;
-    ServerConfig *st = get_server_config(s);
+    apr_status_t rv;
+    ServerConfig *config = get_server_config(s);
 
-    if (!st->cache_lock) {
+    if (!config->cache_lock) {
         ap_log_error(APLOG_MARK, APLOG_CRIT, 0, s, "Global mutex not set.");
         return;
     }
 
-    sts = apr_global_mutex_child_init(&st->cache_lock, st->lock_file, p);
-    if (sts != APR_SUCCESS) {
-        ap_log_error(APLOG_MARK, APLOG_CRIT, sts, s,
+    rv = apr_global_mutex_child_init(&config->cache_lock, config->lock_file, p);
+    if (rv != APR_SUCCESS) {
+        ap_log_error(APLOG_MARK, APLOG_CRIT, rv, s,
                      "Failed to initialise global mutex %s in child process %"
-                     APR_PID_T_FMT ".",
-                     st->lock_file, getpid());
+                     APR_PID_T_FMT ".", config->lock_file, getpid());
     }
 }
 
