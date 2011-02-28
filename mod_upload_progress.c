@@ -302,7 +302,10 @@ static int track_upload_progress(ap_filter_t *f, apr_bucket_brigade *bb,
     int param_error;
     const char* id = get_progress_id(f->r, &param_error);
 
-    if (id == NULL) return rv;
+    if (id == NULL) {
+        up_log(APLOG_MARK, APLOG_DEBUG, 0, server, "Progress id not found, param_error %i", param_error);
+        return rv;
+    }
 
     CACHE_LOCK();
     node = find_node(f->r, id);
