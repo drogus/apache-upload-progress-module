@@ -71,7 +71,7 @@
         up_log(APLOG_MARK, APLOG_DEBUG, 0, server, "CACHE_LOCK()"); \
         apr_status_t status = apr_global_mutex_lock(config->cache_lock);        \
         if (status != APR_SUCCESS) {                          \
-            ap_log_error(APLOG_MARK, APLOG_CRIT, status, 0, \
+            ap_log_error(APLOG_MARK, APLOG_CRIT, status, server, \
                        "%s", apr_strerror(status, errbuf, sizeof(errbuf))); \
         }                                                  \
     } \
