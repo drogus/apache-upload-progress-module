@@ -1,3 +1,11 @@
+/**
+ * This macro is not present in Apache HTTP server version 2.2.3 
+ * Red-Hat 5 / CentOS 5
+ */
+#ifndef ap_is_HTTP_VALID_RESPONSE
+#  define ap_is_HTTP_VALID_RESPONSE(x) (((x) >= 100)&&((x) < 600))
+#endif
+
 /*
  * The following is a patch ported from mod_fcgid for Apache 2.0 releases
  * which don't provide a version of apr_shm_remove.
