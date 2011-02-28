@@ -31,6 +31,11 @@
 #ifndef CACHE_FILENAME
 #  define CACHE_FILENAME "/tmp/upload_progress_cache"
 #endif
+#ifndef PROGRESS_EXPIRES
+/* shared memory entries not updated in PROGRESS_EXPIRES seconds
+   will be reused when needed */
+#  define PROGRESS_EXPIRES 60
+#endif
 #ifndef UP_DEBUG
 #  define UP_DEBUG 0
 #endif
@@ -90,14 +95,13 @@ typedef struct {
     int report_enabled;
 } DirConfig;
 
-
 typedef struct upload_progress_node_s{
     apr_size_t length;
     apr_size_t received;
     int err_status;
     time_t started_at;
     apr_size_t speed; /* bytes per second */
-    time_t expires;
+    time_t updated_at;
     int done;
     char key[ARG_MAXLEN_PROGRESSID];
 } upload_progress_node_t;
@@ -315,7 +319,7 @@ static int track_upload_progress(ap_filter_t *f, apr_bucket_brigade *bb,
     node = find_node(f->r, id);
     if (node) {
         time_t t = time(NULL);
-        node->expires = t + 60;
+        node->updated_at = t;
         if (rv == APR_SUCCESS) {
             apr_off_t length;
             apr_brigade_length(bb, 1, &length);
@@ -419,7 +423,7 @@ void fill_new_upload_node_data(upload_progress_node_t *node, request_rec *r) {
     node->err_status = 0;
     node->started_at = t;
     node->speed = 0;
-    node->expires = t + 60;
+    node->updated_at = t;
     content_length = apr_table_get(r->headers_in, "Content-Length");
     node->length = 1;
     /* Content-Length is missing is case of chunked transfer encoding */
@@ -484,7 +488,7 @@ static apr_status_t upload_progress_cleanup(void *data)
     upload_progress_node_t *node = find_node(r, id);
     if (node) {
         node->err_status = read_request_status(r);
-        node->expires = time(NULL) + 60; /* expires in 60s */
+        node->updated_at = time(NULL);
         node->done = 1;
     } else {
         up_log(APLOG_MARK, APLOG_DEBUG, 0, server, "Node not found for id %s", id);
@@ -506,7 +510,7 @@ static void clean_old_connections(request_rec *r) {
 
     for (i = 0; i < cache->active; i++) {
         node = &nodes[list[i]];
-        if (t > node->expires) {
+        if ((t - node->updated_at) > PROGRESS_EXPIRES) {
             cache->active -= 1;
             tmp = list[cache->active];
             list[cache->active] = list[i];
