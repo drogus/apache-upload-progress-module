@@ -94,11 +94,11 @@ typedef struct {
 } DirConfig;
 
 typedef struct upload_progress_node_s{
-    apr_size_t length;
-    apr_size_t received;
+    apr_off_t length;
+    apr_off_t received;
     int err_status;
     time_t started_at;
-    apr_size_t speed; /* bytes per second */
+    apr_off_t speed; /* bytes per second */
     time_t updated_at;
     int done;
     char key[ARG_MAXLEN_PROGRESSID];
@@ -318,12 +318,12 @@ static int track_upload_progress(ap_filter_t *f, apr_bucket_brigade *bb,
         if (rv == APR_SUCCESS) {
             apr_off_t length;
             apr_brigade_length(bb, 1, &length);
-            node->received += (apr_size_t)length;
+            node->received += length;
             if (node->received > node->length) /* handle chunked tranfer */
                 node->length = node->received;
-            time_t upload_time = t - node->started_at;
+            int upload_time = t - node->started_at;
             if (upload_time > 0) {
-                node->speed = (apr_size_t)(node->received / upload_time);
+                node->speed = node->received / upload_time;
             }
         } else {
             node->err_status = read_request_status(f->r);
@@ -423,7 +423,7 @@ static void fill_new_upload_node_data(upload_progress_node_t *node, request_rec 
     node->length = 1;
     /* Content-Length is missing is case of chunked transfer encoding */
     if (content_length)
-        sscanf(content_length, "%d", &(node->length));
+        sscanf(content_length, "%" APR_OFF_T_FMT, &(node->length));
 }
 
 static upload_progress_node_t* insert_node(request_rec *r, const char *key) {
@@ -699,10 +699,10 @@ static int reportuploads_handler(request_rec *r)
     } else if (upload.done) {
         response = apr_psprintf(r->pool, "{ "
             "\"state\": \"done\", "
-            "\"size\": %" APR_SIZE_T_FMT ", "
-            "\"speed\": %" APR_SIZE_T_FMT ", "
-            "\"started_at\": %u, "
-            "\"completed_at\": %u, "
+            "\"size\": %" APR_OFF_T_FMT ", "
+            "\"speed\": %" APR_OFF_T_FMT ", "
+            "\"started_at\": %li, "
+            "\"completed_at\": %li, "
             "\"uuid\": \"%s\" "
             "}", upload.length, upload.speed, upload.started_at, upload.updated_at, id);
     } else if (upload.received == 0) {
@@ -713,11 +713,11 @@ static int reportuploads_handler(request_rec *r)
         if (eta <= t) eta = t + 1;
         response = apr_psprintf(r->pool, "{ "
             "\"state\": \"uploading\", "
-            "\"received\": %" APR_SIZE_T_FMT ", "
-            "\"size\": %" APR_SIZE_T_FMT ", "
-            "\"speed\": %" APR_SIZE_T_FMT ", "
-            "\"started_at\": %u, "
-            "\"eta\": %u, "
+            "\"received\": %" APR_OFF_T_FMT ", "
+            "\"size\": %" APR_OFF_T_FMT ", "
+            "\"speed\": %" APR_OFF_T_FMT ", "
+            "\"started_at\": %li, "
+            "\"eta\": %li, "
             "\"uuid\": \"%s\" "
             "}", upload.received, upload.length, upload.speed, upload.started_at, eta, id);
     }
