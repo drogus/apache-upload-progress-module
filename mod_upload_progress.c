@@ -101,8 +101,6 @@ typedef struct upload_progress_node_s{
 typedef struct {
     int count;
     int active;
-    upload_progress_node_t *nodes; /* all nodes allocated at once */
-    int *list; /* static array of node indexes, list begins with indexes of active nodes */
 } upload_progress_cache_t;
 
 typedef struct {
@@ -115,9 +113,10 @@ typedef struct {
     char *lock_file;           /* filename for shm lock mutex */
     apr_size_t cache_bytes;
     apr_shm_t *cache_shm;
-    apr_rmm_t *cache_rmm;
     char *cache_file;
     upload_progress_cache_t *cache;
+    int *list; /* static array of node indexes, list begins with indexes of active nodes */
+    upload_progress_node_t *nodes; /* all nodes allocated at once */
 } ServerConfig;
 
 upload_progress_node_t* insert_node(request_rec *r, const char *key);
@@ -440,7 +439,7 @@ upload_progress_node_t* insert_node(request_rec *r, const char *key) {
         ap_log_error(APLOG_MARK, APLOG_NOTICE, 0, r->server, "Cache full");
         return NULL;
     }
-    node = &cache->nodes[cache->list[cache->active]];
+    node = &config->nodes[config->list[cache->active]];
     cache->active += 1;
 
     strncpy(node->key, key, ARG_MAXLEN_PROGRESSID);
@@ -454,8 +453,8 @@ upload_progress_node_t *find_node(request_rec *r, const char *key) {
 
     ServerConfig *config = get_server_config(r->server);
     upload_progress_cache_t *cache = config->cache;
-    upload_progress_node_t *node, *nodes = cache->nodes;
-    int *list = cache->list;
+    upload_progress_node_t *node, *nodes = config->nodes;
+    int *list = config->list;
     int active = cache->active;
     int i;
 
@@ -493,8 +492,8 @@ static void clean_old_connections(request_rec *r) {
 
     ServerConfig *config = get_server_config(r->server);
     upload_progress_cache_t *cache = config->cache;
-    upload_progress_node_t *node, *nodes = cache->nodes;
-    int *list = cache->list;
+    upload_progress_node_t *node, *nodes = config->nodes;
+    int *list = config->list;
     int i, tmp;
     time_t t = time(NULL);
 
@@ -510,19 +509,12 @@ static void clean_old_connections(request_rec *r) {
     }
 }
 
-void *rmm_calloc(apr_rmm_t *rmm, apr_size_t reqsize)
-{
-    apr_rmm_off_t block = apr_rmm_calloc(rmm, reqsize);
-    return block ? apr_rmm_addr_get(rmm, block) : NULL;
-}
-
 apr_status_t upload_progress_cache_init(apr_pool_t *pool, ServerConfig *config)
 {
 /**/up_log(APLOG_MARK, APLOG_DEBUG, 0, global_server, "upload_progress_cache_init()");
 
     apr_status_t result;
     apr_size_t size;
-    upload_progress_cache_t *cache;
     int nodes_cnt, i;
 
     if (config->cache_file) {
@@ -538,33 +530,16 @@ apr_status_t upload_progress_cache_init(apr_pool_t *pool, ServerConfig *config)
 
     /* Determine the usable size of the shm segment. */
     size = apr_shm_size_get(config->cache_shm);
+    nodes_cnt = (size - sizeof(upload_progress_cache_t)) /
+                (sizeof(int) + sizeof(upload_progress_node_t));
 
-    /* This will create a rmm "handler" to get into the shared memory area */
-    result = apr_rmm_init(&config->cache_rmm, NULL,
-                          apr_shm_baseaddr_get(config->cache_shm), size,
-                          pool);
-    if (result != APR_SUCCESS) {
-        return result;
-    }
-
-    /* init cache object */
-    cache = (upload_progress_cache_t *)rmm_calloc(config->cache_rmm,
-                                        sizeof(upload_progress_cache_t));
-    if (!cache) return APR_ENOMEM;
-
-    config->cache = cache;
-    nodes_cnt = ((size - sizeof(upload_progress_cache_t)) /
-                (sizeof(upload_progress_node_t) + sizeof(int))) - 1;
-    cache->count = nodes_cnt;
-    cache->active = 0;
-
-    cache->list = (int *)rmm_calloc(config->cache_rmm, nodes_cnt * sizeof(int));
-    if (!cache->list) return APR_ENOMEM;
-    for (i = 0; i < nodes_cnt; i++) cache->list[i] = i;
-
-    cache->nodes = (upload_progress_node_t *)rmm_calloc(config->cache_rmm,
-                       nodes_cnt * sizeof(upload_progress_node_t));
-    if (!cache->nodes) return APR_ENOMEM;
+    /* init cache */
+    config->cache = (upload_progress_cache_t *)apr_shm_baseaddr_get(config->cache_shm);
+    config->list = (int *)(config->cache + 1);
+    config->nodes = (upload_progress_node_t *)(config->list + nodes_cnt);
+    config->cache->count = nodes_cnt;
+    config->cache->active = 0;
+    for (i = 0; i < nodes_cnt; i++) config->list[i] = i;
 
     ap_log_error(APLOG_MARK, APLOG_INFO, 0, global_server,
                  "Upload Progress: monitoring max %i simultaneous uploads, id (%s) length %i..%i",
