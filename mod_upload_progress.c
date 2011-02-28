@@ -636,9 +636,8 @@ static int reportuploads_handler(request_rec *r)
     server_rec *server = r->server;
 /**/up_log(APLOG_MARK, APLOG_DEBUG, 0, server, "reportuploads_handler()");
 
-    apr_size_t length, received, speed;
-    time_t started_at=0;
-    int done=0, err_status, found=0, param_error;
+    upload_progress_node_t upload, *found;
+    int param_error;
     char *response;
     DirConfig *dir = get_dir_config(r);
 
@@ -670,17 +669,11 @@ static int reportuploads_handler(request_rec *r)
     ServerConfig *config = get_server_config(server);
 
     CACHE_LOCK();
-    upload_progress_node_t *node = find_node(r, id);
-    if (node != NULL) {
+    found = find_node(r, id);
+    if (found) {
         up_log(APLOG_MARK, APLOG_DEBUG, 0, server,
                      "Node with id=%s found for report", id);
-        received = node->received;
-        length = node->length;
-        done = node->done;
-        speed = node->speed;
-        started_at = node->started_at;
-        err_status = node->err_status;
-        found = 1;
+        memcpy(&upload, found, sizeof(upload));
     } else {
         up_log(APLOG_MARK, APLOG_DEBUG, 0, server,
                      "Node with id=%s not found for report", id);
@@ -702,14 +695,36 @@ static int reportuploads_handler(request_rec *r)
 
     if (!found) {
         response = apr_psprintf(r->pool, "{ \"state\" : \"starting\", \"uuid\" : \"%s\" }", id);
-    } else if (err_status >= HTTP_BAD_REQUEST  ) {
-        response = apr_psprintf(r->pool, "{ \"state\" : \"error\", \"status\" : %d, \"uuid\" : \"%s\" }", err_status, id);
-    } else if (done) {
-        response = apr_psprintf(r->pool, "{ \"state\" : \"done\", \"size\" : %d, \"speed\" : %d, \"started_at\": %d, \"uuid\" : \"%s\" }", length, speed, started_at, id);
-    } else if ( length == 0 && received == 0 ) {
+    } else if (upload.err_status >= HTTP_BAD_REQUEST  ) {
+        response = apr_psprintf(r->pool, "{ "
+            "\"state\": \"error\", "
+            "\"status\": %d, "
+            "\"uuid\": \"%s\" "
+            "}", upload.err_status, id);
+    } else if (upload.done) {
+        response = apr_psprintf(r->pool, "{ "
+            "\"state\": \"done\", "
+            "\"size\": %" APR_SIZE_T_FMT ", "
+            "\"speed\": %" APR_SIZE_T_FMT ", "
+            "\"started_at\": %u, "
+            "\"completed_at\": %u, "
+            "\"uuid\": \"%s\" "
+            "}", upload.length, upload.speed, upload.started_at, upload.updated_at, id);
+    } else if (upload.received == 0) {
         response = apr_psprintf(r->pool, "{ \"state\" : \"starting\", \"uuid\" : \"%s\" }", id);
     } else {
-        response = apr_psprintf(r->pool, "{ \"state\" : \"uploading\", \"received\" : %d, \"size\" : %d, \"speed\" : %d, \"started_at\": %d, \"uuid\" : \"%s\" }", received, length, speed, started_at, id);
+        time_t eta = 0, t = time(NULL);
+        if (upload.speed > 0) eta = upload.started_at + upload.length / upload.speed;
+        if (eta <= t) eta = t + 1;
+        response = apr_psprintf(r->pool, "{ "
+            "\"state\": \"uploading\", "
+            "\"received\": %" APR_SIZE_T_FMT ", "
+            "\"size\": %" APR_SIZE_T_FMT ", "
+            "\"speed\": %" APR_SIZE_T_FMT ", "
+            "\"started_at\": %u, "
+            "\"eta\": %u, "
+            "\"uuid\": \"%s\" "
+            "}", upload.received, upload.length, upload.speed, upload.started_at, eta, id);
     }
 
     char *completed_response;
