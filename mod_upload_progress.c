@@ -291,10 +291,10 @@ static int track_upload_progress(ap_filter_t *f, apr_bucket_brigade *bb,
                            ap_input_mode_t mode, apr_read_type_e block,
                            apr_off_t readbytes)
 {
-/**/up_log(APLOG_MARK, APLOG_DEBUG, 0, global_server, "track_upload_progress()");
+    server_rec *server = f->r->server;
+/**/up_log(APLOG_MARK, APLOG_DEBUG, 0, server, "track_upload_progress()");
     apr_status_t rv;
     upload_progress_node_t *node;
-    server_rec *server = f->r->server;
     ServerConfig* config = get_server_config(server);
 
     rv = ap_get_brigade(f->next, bb, mode, block, readbytes);
