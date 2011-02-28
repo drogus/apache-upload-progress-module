@@ -104,11 +104,6 @@ typedef struct {
 } upload_progress_cache_t;
 
 typedef struct {
-    request_rec *r;
-    upload_progress_node_t *node;
-} upload_progress_context_t;
-
-typedef struct {
     apr_global_mutex_t *cache_lock;
     char *lock_file;           /* filename for shm lock mutex */
     apr_size_t cache_bytes;
@@ -184,10 +179,7 @@ static int upload_progress_handle_request(request_rec *r)
         }
 
         if (node) {
-            upload_progress_context_t *ctx = (upload_progress_context_t*)apr_pcalloc(r->pool, sizeof(upload_progress_context_t));
-            ctx->node = node;
-            ctx->r = r;
-            apr_pool_cleanup_register(r->pool, ctx, upload_progress_cleanup, apr_pool_cleanup_null);
+            apr_pool_cleanup_register(r->pool, r, upload_progress_cleanup, apr_pool_cleanup_null);
             ap_add_input_filter("UPLOAD_PROGRESS", NULL, r, r->connection);
         }
         CACHE_UNLOCK();
@@ -468,21 +460,29 @@ upload_progress_node_t *find_node(request_rec *r, const char *key) {
 
 static apr_status_t upload_progress_cleanup(void *data)
 {
-/**/up_log(APLOG_MARK, APLOG_DEBUG, 0, global_server, "upload_progress_cleanup()");
-//    ServerConfig *config = get_server_config(global_server);
+    request_rec *r = (request_rec *)data;
+    server_rec *server = r->server;
+/**/up_log(APLOG_MARK, APLOG_DEBUG, 0, server, "upload_progress_cleanup()");
+    ServerConfig *config = get_server_config(server);
 
-    /* this function should use locking because it modifies node data */
-//    CACHE_LOCK();
+    int param_error;
+    const char* id = get_progress_id(r, &param_error);
 
-    upload_progress_context_t *ctx = (upload_progress_context_t *)data;
-
-    if (ctx && ctx->node) {
-        ctx->node->err_status = read_request_status(ctx->r);
-        ctx->node->expires = time(NULL) + 60; /* expires in 60s */
-        ctx->node->done = 1;
+    if (id == NULL) {
+        up_log(APLOG_MARK, APLOG_DEBUG, 0, server, "Progress id not found, param_error %i", param_error);
+        return APR_SUCCESS;
     }
 
-//    CACHE_LOCK();
+    CACHE_LOCK();
+    upload_progress_node_t *node = find_node(r, id);
+    if (node) {
+        node->err_status = read_request_status(r);
+        node->expires = time(NULL) + 60; /* expires in 60s */
+        node->done = 1;
+    } else {
+        up_log(APLOG_MARK, APLOG_DEBUG, 0, server, "Node not found for id %s", id);
+    }
+    CACHE_UNLOCK();
 
     return APR_SUCCESS;
 }
