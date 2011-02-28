@@ -122,27 +122,24 @@ typedef struct {
     upload_progress_node_t *nodes; /* all nodes allocated at once */
 } ServerConfig;
 
-upload_progress_node_t* insert_node(request_rec *r, const char *key);
-upload_progress_node_t *store_node(ServerConfig *config, const char *key);
-upload_progress_node_t *find_node(request_rec *r, const char *key);
+static upload_progress_node_t* insert_node(request_rec *r, const char *key);
+static upload_progress_node_t *store_node(ServerConfig *config, const char *key);
+static upload_progress_node_t *find_node(request_rec *r, const char *key);
 static void clean_old_connections(request_rec *r);
-void fill_new_upload_node_data(upload_progress_node_t *node, request_rec *r);
+static void fill_new_upload_node_data(upload_progress_node_t *node, request_rec *r);
 static apr_status_t upload_progress_cleanup(void *data);
-const char *get_progress_id(request_rec *, int *);
-
-//from passenger
-typedef const char * (*CmdFunc)();// Workaround for some weird C++-specific compiler error.
+static const char *get_progress_id(request_rec *, int *);
 
 extern module AP_MODULE_DECLARE_DATA upload_progress_module;
 
-/**/server_rec *global_server = NULL;
+static server_rec *global_server = NULL;
 
-inline ServerConfig *get_server_config(server_rec *s)
+static inline ServerConfig *get_server_config(server_rec *s)
 {
     return (ServerConfig *)ap_get_module_config(s->module_config, &upload_progress_module);
 }
 
-inline DirConfig *get_dir_config(request_rec *r)
+static inline DirConfig *get_dir_config(request_rec *r)
 {
     return (DirConfig *)ap_get_module_config(r->per_dir_config, &upload_progress_module);
 }
@@ -278,7 +275,7 @@ static void *upload_progress_merge_server_config(apr_pool_t *p, void *basev,
     return basev;
 }
 
-int read_request_status(request_rec *r)
+static int read_request_status(request_rec *r)
 {
     int status;
 
@@ -339,7 +336,7 @@ static int track_upload_progress(ap_filter_t *f, apr_bucket_brigade *bb,
     return rv;
 }
 
-int check_request_argument(const char *value, int len, char *allowed, int minlen, int maxlen) {
+static int check_request_argument(const char *value, int len, char *allowed, int minlen, int maxlen) {
     /* Check the length of the argument */
     if (len > maxlen) return -1;
     if (len < minlen) return -2;
@@ -350,7 +347,7 @@ int check_request_argument(const char *value, int len, char *allowed, int minlen
     return 0;
 }
 
-char *get_param_value(char *p, const char *param_name, int *len) {
+static char *get_param_value(char *p, const char *param_name, int *len) {
     char pn1[3] = {toupper(param_name[0]), tolower(param_name[0]), 0};
     int pn_len = strlen(param_name);
     char *val_end;
@@ -369,7 +366,7 @@ char *get_param_value(char *p, const char *param_name, int *len) {
     return p;
 }
 
-const char *get_progress_id(request_rec *r, int *param_error) {
+static const char *get_progress_id(request_rec *r, int *param_error) {
     int len;
 
     /* try to find progress id in http headers */
@@ -394,7 +391,7 @@ const char *get_progress_id(request_rec *r, int *param_error) {
     return NULL;
 }
 
-const char *get_json_callback_param(request_rec *r, int *param_error) {
+static const char *get_json_callback_param(request_rec *r, int *param_error) {
     char *val;
     int len;
 
@@ -410,11 +407,11 @@ const char *get_json_callback_param(request_rec *r, int *param_error) {
     return NULL;
 }
 
-inline int check_node(upload_progress_node_t *node, const char *key) {
+static inline int check_node(upload_progress_node_t *node, const char *key) {
     return strncasecmp(node->key, key, ARG_MAXLEN_PROGRESSID) == 0 ? 1 : 0;
 }
 
-void fill_new_upload_node_data(upload_progress_node_t *node, request_rec *r) {
+static void fill_new_upload_node_data(upload_progress_node_t *node, request_rec *r) {
     const char *content_length;
     time_t t = time(NULL);
 
@@ -431,7 +428,7 @@ void fill_new_upload_node_data(upload_progress_node_t *node, request_rec *r) {
         sscanf(content_length, "%d", &(node->length));
 }
 
-upload_progress_node_t* insert_node(request_rec *r, const char *key) {
+static upload_progress_node_t* insert_node(request_rec *r, const char *key) {
 /**/up_log(APLOG_MARK, APLOG_DEBUG, 0, r->server, "insert_node()");
 
     ServerConfig *config = get_server_config(r->server);
@@ -451,7 +448,7 @@ upload_progress_node_t* insert_node(request_rec *r, const char *key) {
     return node;
 }
 
-upload_progress_node_t *find_node(request_rec *r, const char *key) {
+static upload_progress_node_t *find_node(request_rec *r, const char *key) {
 /**/up_log(APLOG_MARK, APLOG_DEBUG, 0, r->server, "find_node()");
 
     ServerConfig *config = get_server_config(r->server);
@@ -520,7 +517,7 @@ static void clean_old_connections(request_rec *r) {
     }
 }
 
-apr_status_t upload_progress_cache_init(apr_pool_t *pool, ServerConfig *config)
+static apr_status_t upload_progress_cache_init(apr_pool_t *pool, ServerConfig *config)
 {
 /**/up_log(APLOG_MARK, APLOG_DEBUG, 0, global_server, "upload_progress_cache_init()");
 
@@ -559,7 +556,7 @@ apr_status_t upload_progress_cache_init(apr_pool_t *pool, ServerConfig *config)
     return APR_SUCCESS;
 }
 
-int upload_progress_init(apr_pool_t *p, apr_pool_t *plog,
+static int upload_progress_init(apr_pool_t *p, apr_pool_t *plog,
                     apr_pool_t *ptemp,
                     server_rec *s) {
 /**/up_log(APLOG_MARK, APLOG_DEBUG, 0, s, "upload_progress_init()");
@@ -788,11 +785,11 @@ static void upload_progress_child_init(apr_pool_t *p, server_rec *s)
 
 static const command_rec upload_progress_cmds[] =
 {
-    AP_INIT_FLAG("TrackUploads", (CmdFunc) track_upload_progress_cmd, NULL, OR_AUTHCFG,
+    AP_INIT_FLAG("TrackUploads", track_upload_progress_cmd, NULL, OR_AUTHCFG,
                  "Track upload progress in this location"),
-    AP_INIT_FLAG("ReportUploads", (CmdFunc) report_upload_progress_cmd, NULL, OR_AUTHCFG,
+    AP_INIT_FLAG("ReportUploads", report_upload_progress_cmd, NULL, OR_AUTHCFG,
                  "Report upload progress in this location"),
-    AP_INIT_TAKE1("UploadProgressSharedMemorySize", (CmdFunc) upload_progress_shared_memory_size_cmd, NULL, RSRC_CONF,
+    AP_INIT_TAKE1("UploadProgressSharedMemorySize", upload_progress_shared_memory_size_cmd, NULL, RSRC_CONF,
                  "Size of shared memory used to keep uploads data, default 100KB"),
     { NULL }
 };
