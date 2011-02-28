@@ -8,6 +8,7 @@
  */
 /* BEGIN OF PATCH ---------------------------------------------------------- */
 /* apr version 0.x not support apr_shm_remove, I have to copy it from apr version 1.x */
+#if (APR_MAJOR_VERSION < 1)
 
 #if APR_HAS_SHARED_MEMORY
 
@@ -101,4 +102,6 @@ shm_remove_failed:
 }
 /* END OF PATCH ------------------------------------------------------------ */
 
+#endif
+/* (APR_MAJOR_VERSION < 1) */
 #endif

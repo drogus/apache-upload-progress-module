@@ -18,9 +18,7 @@
 #include <unistd.h>
 #endif
 
-#if (APR_MAJOR_VERSION < 1)
-#include "apr_shm_remove.h"
-#endif
+#include "ap_backports.h"
 
 #ifndef PROGRESS_ID
 #  define PROGRESS_ID "X-Progress-ID"
