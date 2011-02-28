@@ -55,8 +55,12 @@
 #  define ARG_MAXLEN_JSONPCALLBACK 64
 #endif
 
-#if UP_DEBUG == 1
-#  define up_log(...) ap_log_error( __VA_ARGS__ )
+#if UP_DEBUG > 0
+#  if UP_DEBUG > 1
+#    define up_log(m,s,err,srv,fmtstr,...) ap_log_error( m, s, err, srv, "pid:%" APR_PID_T_FMT " " fmtstr, getpid(), ##__VA_ARGS__ )
+#  else
+#    define up_log(...) ap_log_error( __VA_ARGS__ )
+#  endif
 #else
 #  define up_log(...)
 #endif
