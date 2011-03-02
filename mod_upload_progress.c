@@ -105,6 +105,11 @@ typedef struct upload_progress_node_s{
 } upload_progress_node_t;
 
 typedef struct {
+    apr_time_t cache_updated_at;
+    upload_progress_node_t node;
+} upload_progress_req_t;
+
+typedef struct {
     int count;
     int active;
 } upload_progress_cache_t;
@@ -141,6 +146,12 @@ static inline DirConfig *get_dir_config(request_rec *r)
 {
     return (DirConfig *)ap_get_module_config(r->per_dir_config, &upload_progress_module);
 }
+
+static inline upload_progress_req_t *get_request_config(request_rec *r)
+{
+    return (upload_progress_req_t *)ap_get_module_config(r->request_config, &upload_progress_module);
+}
+
 
 static int upload_progress_handle_request(request_rec *r)
 {
@@ -184,6 +195,13 @@ static int upload_progress_handle_request(request_rec *r)
         }
 
         if (node) {
+            upload_progress_req_t *reqinfo = (upload_progress_req_t *)apr_pcalloc(r->pool,
+                                           sizeof(upload_progress_req_t));
+            if (reqinfo) {
+                reqinfo->cache_updated_at = apr_time_now();
+                memcpy(&(reqinfo->node), node, sizeof(upload_progress_node_t));
+            }
+            ap_set_module_config(r->request_config, &upload_progress_module, reqinfo);
             apr_pool_cleanup_register(r->pool, r, upload_progress_cleanup, apr_pool_cleanup_null);
             ap_add_input_filter("UPLOAD_PROGRESS", NULL, r, r->connection);
         }
@@ -298,40 +316,44 @@ static int track_upload_progress(ap_filter_t *f, apr_bucket_brigade *bb,
 {
     server_rec *server = f->r->server;
 /**/up_log(APLOG_MARK, APLOG_DEBUG, 0, server, "track_upload_progress()");
-    apr_status_t rv;
-    upload_progress_node_t *node;
     ServerConfig* config = get_server_config(server);
 
-    rv = ap_get_brigade(f->next, bb, mode, block, readbytes);
+    apr_status_t rv = ap_get_brigade(f->next, bb, mode, block, readbytes);
 
-    int param_error;
-    const char* id = get_progress_id(f->r, &param_error);
-
-    if (id == NULL) {
-        up_log(APLOG_MARK, APLOG_DEBUG, 0, server, "Progress id not found, param_error %i", param_error);
+    upload_progress_req_t *reqinfo = get_request_config(f->r);
+    if (!reqinfo) {
+        up_log(APLOG_MARK, APLOG_DEBUG, 0, server, "Request config not available");
         return rv;
     }
+    upload_progress_node_t *node = &(reqinfo->node);
 
-    CACHE_LOCK();
-    node = find_node(server, id);
-    if (node) {
-        time_t t = time(NULL);
-        node->updated_at = t;
-        if (rv == APR_SUCCESS) {
-            apr_off_t length;
-            apr_brigade_length(bb, 1, &length);
-            node->received += length;
-            if (node->received > node->length) /* handle chunked tranfer */
-                node->length = node->received;
-            int upload_time = t - node->started_at;
-            if (upload_time > 0) {
-                node->speed = node->received / upload_time;
-            }
-        } else {
-            node->err_status = read_request_status(f->r);
+    time_t t = time(NULL);
+    node->updated_at = t;
+    if (rv == APR_SUCCESS) {
+        apr_off_t length;
+        apr_brigade_length(bb, 1, &length);
+        node->received += length;
+        if (node->received > node->length) /* handle chunked tranfer */
+            node->length = node->received;
+        int upload_time = t - node->started_at;
+        if (upload_time > 0) {
+            node->speed = node->received / upload_time;
         }
+    } else {
+        node->err_status = read_request_status(f->r);
+        reqinfo->cache_updated_at = 0; /* force cache update */
     }
-    CACHE_UNLOCK();
+
+    apr_time_t now = apr_time_now();
+    if ((now - reqinfo->cache_updated_at) > apr_time_from_msec(500)) {
+        reqinfo->cache_updated_at = now;
+        CACHE_LOCK();
+        upload_progress_node_t *cache_node = find_node(server, node->key);
+        if (cache_node) {
+            memcpy(cache_node, node, sizeof(upload_progress_node_t);
+        }
+        CACHE_UNLOCK();
+    }
 
     return rv;
 }
@@ -469,22 +491,20 @@ static apr_status_t upload_progress_cleanup(void *data)
 /**/up_log(APLOG_MARK, APLOG_DEBUG, 0, server, "upload_progress_cleanup()");
     ServerConfig *config = get_server_config(server);
 
-    int param_error;
-    const char* id = get_progress_id(r, &param_error);
-
-    if (id == NULL) {
-        up_log(APLOG_MARK, APLOG_DEBUG, 0, server, "Progress id not found, param_error %i", param_error);
+    upload_progress_req_t *reqinfo = get_request_config(r);
+    if (!reqinfo) {
+        up_log(APLOG_MARK, APLOG_DEBUG, 0, server, "Request config not available");
         return APR_SUCCESS;
     }
+    upload_progress_node_t *node = &(reqinfo->node);
+    node->err_status = read_request_status(r);
+    node->updated_at = time(NULL);
+    node->done = 1;
 
     CACHE_LOCK();
-    upload_progress_node_t *node = find_node(server, id);
-    if (node) {
-        node->err_status = read_request_status(r);
-        node->updated_at = time(NULL);
-        node->done = 1;
-    } else {
-        up_log(APLOG_MARK, APLOG_DEBUG, 0, server, "Node not found for id %s", id);
+    upload_progress_node_t *cache_node = find_node(server, node->key);
+    if (cache_node) {
+        memcpy(cache_node, node, sizeof(upload_progress_node_t));
     }
     CACHE_UNLOCK();
 

@@ -7,6 +7,13 @@
 #endif
 
 /*
+ * apr_time_from_msec is defined in APR 1.4.0 or later
+ */
+#if (APR_MAJOR_VERSION < 1) || ((APR_MAJOR_VERSION == 1) && (APR_MINOR_VERSION < 4))
+#define apr_time_from_msec(x) (x * 1000)
+#endif
+
+/*
  * The following is a patch ported from mod_fcgid for Apache 2.0 releases
  * which don't provide a version of apr_shm_remove.
  *
