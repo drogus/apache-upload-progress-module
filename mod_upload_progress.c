@@ -122,10 +122,10 @@ typedef struct {
 
 static upload_progress_node_t* insert_node(request_rec *r, const char *key);
 static upload_progress_node_t *store_node(ServerConfig *config, const char *key);
-static upload_progress_node_t *find_node(request_rec *r, const char *key);
+static upload_progress_node_t *find_node(server_rec *, const char *);
 static void clean_old_connections(request_rec *r);
 static void fill_new_upload_node_data(upload_progress_node_t *node, request_rec *r);
-static apr_status_t upload_progress_cleanup(void *data);
+static apr_status_t upload_progress_cleanup(void *);
 static const char *get_progress_id(request_rec *, int *);
 
 extern module AP_MODULE_DECLARE_DATA upload_progress_module;
@@ -167,7 +167,7 @@ static int upload_progress_handle_request(request_rec *r)
                      "Upload Progress: Upload id='%s' in trackable location: %s.", id, r->uri);
         CACHE_LOCK();
         clean_old_connections(r);
-        upload_progress_node_t *node = find_node(r, id);
+        upload_progress_node_t *node = find_node(server, id);
         if (node == NULL) {
             node = insert_node(r, id);
             if (node)
@@ -313,7 +313,7 @@ static int track_upload_progress(ap_filter_t *f, apr_bucket_brigade *bb,
     }
 
     CACHE_LOCK();
-    node = find_node(f->r, id);
+    node = find_node(server, id);
     if (node) {
         time_t t = time(NULL);
         node->updated_at = t;
@@ -448,10 +448,10 @@ static upload_progress_node_t* insert_node(request_rec *r, const char *key) {
     return node;
 }
 
-static upload_progress_node_t *find_node(request_rec *r, const char *key) {
-/**/up_log(APLOG_MARK, APLOG_DEBUG, 0, r->server, "find_node()");
+static upload_progress_node_t *find_node(server_rec *server, const char *key) {
+/**/up_log(APLOG_MARK, APLOG_DEBUG, 0, server, "find_node()");
 
-    ServerConfig *config = get_server_config(r->server);
+    ServerConfig *config = get_server_config(server);
     upload_progress_cache_t *cache = config->cache;
     upload_progress_node_t *node, *nodes = config->nodes;
     int *list = config->list;
@@ -482,7 +482,7 @@ static apr_status_t upload_progress_cleanup(void *data)
     }
 
     CACHE_LOCK();
-    upload_progress_node_t *node = find_node(r, id);
+    upload_progress_node_t *node = find_node(server, id);
     if (node) {
         node->err_status = read_request_status(r);
         node->updated_at = time(NULL);
@@ -666,7 +666,7 @@ static int reportuploads_handler(request_rec *r)
     ServerConfig *config = get_server_config(server);
 
     CACHE_LOCK();
-    found = find_node(r, id);
+    found = find_node(server, id);
     if (found) {
         up_log(APLOG_MARK, APLOG_DEBUG, 0, server,
                      "Node with id=%s found for report", id);
