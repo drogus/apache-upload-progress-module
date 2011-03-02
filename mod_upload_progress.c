@@ -50,6 +50,9 @@
 #ifndef ARG_MAXLEN_PROGRESSID
 #  define ARG_MAXLEN_PROGRESSID 128
 #endif
+#define UP_STRINGIFY(arg) #arg
+#define UP_TOSTRING(arg) UP_STRINGIFY(arg)
+#define UP_ID_FMT "." UP_TOSTRING(ARG_MAXLEN_PROGRESSID) "s"
 #ifndef ARG_MINLEN_JSONPCALLBACK
 #  define ARG_MINLEN_JSONPCALLBACK 1
 #endif
@@ -125,9 +128,8 @@ typedef struct {
     upload_progress_node_t *nodes; /* all nodes allocated at once */
 } ServerConfig;
 
-static upload_progress_node_t* insert_node(request_rec *r, const char *key);
+static void upload_progress_cache_write(server_rec *, upload_progress_node_t *);
 static upload_progress_node_t *find_node(server_rec *, const char *);
-static void clean_old_connections(request_rec *r);
 static apr_status_t upload_progress_cleanup(void *);
 static const char *get_progress_id(request_rec *, int *);
 
@@ -157,7 +159,6 @@ static int upload_progress_handle_request(request_rec *r)
 /**/up_log(APLOG_MARK, APLOG_DEBUG, 0, server, "upload_progress_handle_request()");
 
     DirConfig *dir = get_dir_config(r);
-    ServerConfig *config = get_server_config(server); /* for CACHE_LOCK */
 
     if (!dir || (dir->track_enabled <= 0)) {
         return DECLINED;
@@ -174,24 +175,15 @@ static int upload_progress_handle_request(request_rec *r)
     if (id) {
         ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, server,
                      "Upload Progress: Upload id='%s' in trackable location: %s.", id, r->uri);
-        CACHE_LOCK();
-        clean_old_connections(r);
-        upload_progress_node_t *node = find_node(server, id);
-        if (node == NULL) {
-            node = insert_node(r, id);
-            if (node)
-                up_log(APLOG_MARK, APLOG_DEBUG, 0, server,
-                       "Upload Progress: Added upload with id='%s' to list.", id);
-        } else if (node->done) {
-            up_log(APLOG_MARK, APLOG_DEBUG, 0, server,
-                         "Upload Progress: Reused existing node with id='%s'.", id);
-        } else {
-            node = NULL;
-            ap_log_error(APLOG_MARK, APLOG_INFO, 0, server,
-                         "Upload Progress: Upload with id='%s' already exists, ignoring.", id);
-        }
 
-        if (node) {
+        upload_progress_req_t *reqinfo = (upload_progress_req_t *)apr_pcalloc(r->pool,
+                                       sizeof(upload_progress_req_t));
+        upload_progress_node_t *node = NULL;
+        if (reqinfo) {
+            reqinfo->cache_updated_at = apr_time_now();
+            upload_progress_node_t *node = &(reqinfo->node);
+
+            strncpy(node->key, id, ARG_MAXLEN_PROGRESSID);
             time_t t = time(NULL);
 
             node->received = 0;
@@ -205,18 +197,13 @@ static int upload_progress_handle_request(request_rec *r)
             /* Content-Length is missing is case of chunked transfer encoding */
             if (content_length)
                 sscanf(content_length, "%" APR_OFF_T_FMT, &(node->length));
-
-            upload_progress_req_t *reqinfo = (upload_progress_req_t *)apr_pcalloc(r->pool,
-                                           sizeof(upload_progress_req_t));
-            if (reqinfo) {
-                reqinfo->cache_updated_at = apr_time_now();
-                memcpy(&(reqinfo->node), node, sizeof(upload_progress_node_t));
-            }
-            ap_set_module_config(r->request_config, &upload_progress_module, reqinfo);
-            apr_pool_cleanup_register(r->pool, r, upload_progress_cleanup, apr_pool_cleanup_null);
-            ap_add_input_filter("UPLOAD_PROGRESS", NULL, r, r->connection);
         }
-        CACHE_UNLOCK();
+
+        ap_set_module_config(r->request_config, &upload_progress_module, reqinfo);
+        apr_pool_cleanup_register(r->pool, r, upload_progress_cleanup, apr_pool_cleanup_null);
+        ap_add_input_filter("UPLOAD_PROGRESS", NULL, r, r->connection);
+
+        upload_progress_cache_write(server, node);
 
     } else if (param_error < 0) {
         ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, server,
@@ -327,7 +314,6 @@ static int track_upload_progress(ap_filter_t *f, apr_bucket_brigade *bb,
 {
     server_rec *server = f->r->server;
 /**/up_log(APLOG_MARK, APLOG_DEBUG, 0, server, "track_upload_progress()");
-    ServerConfig* config = get_server_config(server);
 
     apr_status_t rv = ap_get_brigade(f->next, bb, mode, block, readbytes);
 
@@ -358,12 +344,7 @@ static int track_upload_progress(ap_filter_t *f, apr_bucket_brigade *bb,
     apr_time_t now = apr_time_now();
     if ((now - reqinfo->cache_updated_at) > apr_time_from_msec(500)) {
         reqinfo->cache_updated_at = now;
-        CACHE_LOCK();
-        upload_progress_node_t *cache_node = find_node(server, node->key);
-        if (cache_node) {
-            memcpy(cache_node, node, sizeof(upload_progress_node_t);
-        }
-        CACHE_UNLOCK();
+        upload_progress_cache_write(server, node);
     }
 
     return rv;
@@ -440,25 +421,6 @@ static const char *get_json_callback_param(request_rec *r, int *param_error) {
     return NULL;
 }
 
-static upload_progress_node_t* insert_node(request_rec *r, const char *key) {
-/**/up_log(APLOG_MARK, APLOG_DEBUG, 0, r->server, "insert_node()");
-
-    ServerConfig *config = get_server_config(r->server);
-    upload_progress_cache_t *cache = config->cache;
-    upload_progress_node_t *node;
-
-    if (cache->active == cache->count) {
-        ap_log_error(APLOG_MARK, APLOG_NOTICE, 0, r->server, "Cache full");
-        return NULL;
-    }
-    node = &config->nodes[config->list[cache->active]];
-    cache->active += 1;
-
-    strncpy(node->key, key, ARG_MAXLEN_PROGRESSID);
-
-    return node;
-}
-
 static upload_progress_node_t *find_node(server_rec *server, const char *key) {
 /**/up_log(APLOG_MARK, APLOG_DEBUG, 0, server, "find_node()");
 
@@ -482,7 +444,6 @@ static apr_status_t upload_progress_cleanup(void *data)
     request_rec *r = (request_rec *)data;
     server_rec *server = r->server;
 /**/up_log(APLOG_MARK, APLOG_DEBUG, 0, server, "upload_progress_cleanup()");
-    ServerConfig *config = get_server_config(server);
 
     upload_progress_req_t *reqinfo = get_request_config(r);
     if (!reqinfo) {
@@ -493,37 +454,65 @@ static apr_status_t upload_progress_cleanup(void *data)
     node->err_status = read_request_status(r);
     node->updated_at = time(NULL);
     node->done = 1;
-
-    CACHE_LOCK();
-    upload_progress_node_t *cache_node = find_node(server, node->key);
-    if (cache_node) {
-        memcpy(cache_node, node, sizeof(upload_progress_node_t));
-    }
-    CACHE_UNLOCK();
+    upload_progress_cache_write(server, node);
 
     return APR_SUCCESS;
 }
 
-static void clean_old_connections(request_rec *r) {
-/**/up_log(APLOG_MARK, APLOG_DEBUG, 0, r->server, "clean_old_connections()");
+static void upload_progress_cache_write(server_rec *server, upload_progress_node_t *new_data)
+{
+    if (!new_data) return;
+    ServerConfig *config = get_server_config(server);
 
-    ServerConfig *config = get_server_config(r->server);
-    upload_progress_cache_t *cache = config->cache;
-    upload_progress_node_t *node, *nodes = config->nodes;
-    int *list = config->list;
-    int i, tmp;
-    time_t t = time(NULL);
-
-    for (i = 0; i < cache->active; i++) {
-        node = &nodes[list[i]];
-        if ((t - node->updated_at) > PROGRESS_EXPIRES) {
-            cache->active -= 1;
-            tmp = list[cache->active];
-            list[cache->active] = list[i];
-            list[i] = tmp;
-            i--;
+    CACHE_LOCK();
+    upload_progress_node_t *node = find_node(server, new_data->key);
+    time_t now = time(NULL);
+#define EXPIRED(node,now) ((now - node->updated_at) > PROGRESS_EXPIRES)
+    if (node) {
+        /* reuse node if: request finished, expired, or same started_at as node */
+        if (node->started_at == new_data->started_at || node->done || EXPIRED(node, now)) {
+            memcpy(node, new_data, sizeof(upload_progress_node_t));
+            up_log(APLOG_MARK, APLOG_DEBUG, 0, server,
+                         "Upload Progress: Reused existing node with id='%" UP_ID_FMT "'.", node->key);
+        } else {
+            ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, server,
+                         "Upload Progress: Upload with id='%" UP_ID_FMT "' already exists, ignoring.", node->key);
         }
+    } else {
+
+        up_log(APLOG_MARK, APLOG_DEBUG, 0, server, "cleaning expired cache nodes");
+
+        upload_progress_cache_t *cache = config->cache;
+        upload_progress_node_t *nodes = config->nodes;
+        int *list = config->list;
+        int i, tmp;
+
+        /* check active nodes list, if expired node found
+           then swap it with last active and shrink active list by one */
+        for (i = 0; i < cache->active; i++) {
+            node = &nodes[list[i]];
+            if (EXPIRED(node, now)) {
+                cache->active -= 1;
+                tmp = list[cache->active];
+                list[cache->active] = list[i];
+                list[i] = tmp;
+                i--;
+            }
+        }
+
+        if (cache->active < cache->count) {
+            node = &config->nodes[config->list[cache->active]];
+            cache->active += 1;
+            memcpy(node, new_data, sizeof(upload_progress_node_t));
+            up_log(APLOG_MARK, APLOG_DEBUG, 0, server,
+                   "Upload Progress: Added upload with id='%" UP_ID_FMT "' to list.", node->key);
+        } else {
+            ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, server, "Cache full");
+        }
+
     }
+    CACHE_UNLOCK();
+
 }
 
 static apr_status_t upload_progress_cache_init(apr_pool_t *pool, ServerConfig *config)
