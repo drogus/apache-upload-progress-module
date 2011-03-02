@@ -126,7 +126,6 @@ typedef struct {
 } ServerConfig;
 
 static upload_progress_node_t* insert_node(request_rec *r, const char *key);
-static upload_progress_node_t *store_node(ServerConfig *config, const char *key);
 static upload_progress_node_t *find_node(server_rec *, const char *);
 static void clean_old_connections(request_rec *r);
 static void fill_new_upload_node_data(upload_progress_node_t *node, request_rec *r);
