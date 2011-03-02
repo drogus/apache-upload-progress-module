@@ -128,7 +128,6 @@ typedef struct {
 static upload_progress_node_t* insert_node(request_rec *r, const char *key);
 static upload_progress_node_t *find_node(server_rec *, const char *);
 static void clean_old_connections(request_rec *r);
-static void fill_new_upload_node_data(upload_progress_node_t *node, request_rec *r);
 static apr_status_t upload_progress_cleanup(void *);
 static const char *get_progress_id(request_rec *, int *);
 
@@ -184,7 +183,6 @@ static int upload_progress_handle_request(request_rec *r)
                 up_log(APLOG_MARK, APLOG_DEBUG, 0, server,
                        "Upload Progress: Added upload with id='%s' to list.", id);
         } else if (node->done) {
-            fill_new_upload_node_data(node, r);
             up_log(APLOG_MARK, APLOG_DEBUG, 0, server,
                          "Upload Progress: Reused existing node with id='%s'.", id);
         } else {
@@ -194,6 +192,20 @@ static int upload_progress_handle_request(request_rec *r)
         }
 
         if (node) {
+            time_t t = time(NULL);
+
+            node->received = 0;
+            node->done = 0;
+            node->err_status = 0;
+            node->started_at = t;
+            node->speed = 0;
+            node->updated_at = t;
+            const char *content_length = apr_table_get(r->headers_in, "Content-Length");
+            node->length = 1;
+            /* Content-Length is missing is case of chunked transfer encoding */
+            if (content_length)
+                sscanf(content_length, "%" APR_OFF_T_FMT, &(node->length));
+
             upload_progress_req_t *reqinfo = (upload_progress_req_t *)apr_pcalloc(r->pool,
                                            sizeof(upload_progress_req_t));
             if (reqinfo) {
@@ -428,23 +440,6 @@ static const char *get_json_callback_param(request_rec *r, int *param_error) {
     return NULL;
 }
 
-static void fill_new_upload_node_data(upload_progress_node_t *node, request_rec *r) {
-    const char *content_length;
-    time_t t = time(NULL);
-
-    node->received = 0;
-    node->done = 0;
-    node->err_status = 0;
-    node->started_at = t;
-    node->speed = 0;
-    node->updated_at = t;
-    content_length = apr_table_get(r->headers_in, "Content-Length");
-    node->length = 1;
-    /* Content-Length is missing is case of chunked transfer encoding */
-    if (content_length)
-        sscanf(content_length, "%" APR_OFF_T_FMT, &(node->length));
-}
-
 static upload_progress_node_t* insert_node(request_rec *r, const char *key) {
 /**/up_log(APLOG_MARK, APLOG_DEBUG, 0, r->server, "insert_node()");
 
@@ -460,7 +455,6 @@ static upload_progress_node_t* insert_node(request_rec *r, const char *key) {
     cache->active += 1;
 
     strncpy(node->key, key, ARG_MAXLEN_PROGRESSID);
-    fill_new_upload_node_data(node, r);
 
     return node;
 }
