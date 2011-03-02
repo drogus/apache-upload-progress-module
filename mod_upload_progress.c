@@ -407,10 +407,6 @@ static const char *get_json_callback_param(request_rec *r, int *param_error) {
     return NULL;
 }
 
-static inline int check_node(upload_progress_node_t *node, const char *key) {
-    return strncasecmp(node->key, key, ARG_MAXLEN_PROGRESSID) == 0 ? 1 : 0;
-}
-
 static void fill_new_upload_node_data(upload_progress_node_t *node, request_rec *r) {
     const char *content_length;
     time_t t = time(NULL);
@@ -460,7 +456,7 @@ static upload_progress_node_t *find_node(server_rec *server, const char *key) {
 
     for (i = 0; i < active; i++) {
         node = &nodes[list[i]];
-        if (check_node(node, key))
+        if (strncasecmp(node->key, key, ARG_MAXLEN_PROGRESSID) == 0)
           return node;
     }
     return NULL;
