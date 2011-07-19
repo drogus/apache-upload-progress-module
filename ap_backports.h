@@ -1,3 +1,18 @@
+/**
+ * This macro is not present in Apache HTTP server version 2.2.3 
+ * Red-Hat 5 / CentOS 5
+ */
+#ifndef ap_is_HTTP_VALID_RESPONSE
+#  define ap_is_HTTP_VALID_RESPONSE(x) (((x) >= 100)&&((x) < 600))
+#endif
+
+/*
+ * apr_time_from_msec is defined in APR 1.4.0 or later
+ */
+#if (APR_MAJOR_VERSION < 1) || ((APR_MAJOR_VERSION == 1) && (APR_MINOR_VERSION < 4))
+#define apr_time_from_msec(x) (x * 1000)
+#endif
+
 /*
  * The following is a patch ported from mod_fcgid for Apache 2.0 releases
  * which don't provide a version of apr_shm_remove.
@@ -8,6 +23,7 @@
  */
 /* BEGIN OF PATCH ---------------------------------------------------------- */
 /* apr version 0.x not support apr_shm_remove, I have to copy it from apr version 1.x */
+#if (APR_MAJOR_VERSION < 1)
 
 #if APR_HAS_SHARED_MEMORY
 
@@ -101,4 +117,6 @@ shm_remove_failed:
 }
 /* END OF PATCH ------------------------------------------------------------ */
 
+#endif
+/* (APR_MAJOR_VERSION < 1) */
 #endif
