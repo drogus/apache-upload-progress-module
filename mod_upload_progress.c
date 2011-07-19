@@ -421,6 +421,10 @@ static const char *get_json_callback_param(request_rec *r, int *param_error) {
     return NULL;
 }
 
+static inline int check_node(upload_progress_node_t *node, const char *key) {
+    return ((node) && (strncasecmp(node->key, key, ARG_MAXLEN_PROGRESSID) == 0)) ? 1 : 0;
+}
+
 static upload_progress_node_t *find_node(server_rec *server, const char *key) {
 /**/up_log(APLOG_MARK, APLOG_DEBUG, 0, server, "find_node()");
 
@@ -433,7 +437,7 @@ static upload_progress_node_t *find_node(server_rec *server, const char *key) {
 
     for (i = 0; i < active; i++) {
         node = &nodes[list[i]];
-        if (strncasecmp(node->key, key, ARG_MAXLEN_PROGRESSID) == 0)
+        if (check_node(node, key))
           return node;
     }
     return NULL;
@@ -685,7 +689,7 @@ static int reportuploads_handler(request_rec *r)
      * request in error:        err_status >= NGX_HTTP_SPECIAL_RESPONSE
      * request finished:        done = true
      * request not yet started but registered:        length==0 && rest ==0
-     * reauest in progress:     rest > 0
+     * request in progress:     rest > 0
      */
 
     if (!found) {
