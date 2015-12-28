@@ -1,3 +1,12 @@
+#include <ap_release.h>
+
+/**
+ * unixd_* functions are prefixed with ap_ since Apache 2.4
+ */
+#if (AP_SERVER_MINORVERSION_NUMBER < 2) || ((AP_SERVER_MAJORVERSION_NUMBER == 2) && (AP_SERVER_MINORVERSION_NUMBER < 4))
+#  define unixd_set_global_mutex_perms ap_unixd_set_global_mutex_perms
+#endif
+
 /**
  * This macro is not present in Apache HTTP server version 2.2.3 
  * Red-Hat 5 / CentOS 5
