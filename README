@@ -13,8 +13,25 @@ To install and activate module:
   -i -> install (copy upload_progress_module.so to apache lib folder)
   -a -> activate (add LoadModule line to httpd.conf)
 
-To compile it on mac you may need to:
-  sudo apxs -c -i -Wc,-arch -Wc,ppc7400 -Wl,-arch -Wl,ppc7400 -Wc,-arch -Wc,ppc64 -Wl,-arch -Wl,ppc64 -Wc,-arch -Wc,x86_64 -Wl,-arch -Wl,x86_64 -Wc,-arch -Wc,i386 -Wl,-arch -Wl,i386 mod_upload_progress.c
+On Macs:
+  apxs -c -i -a -Wc,"-arch i386 -arch x86_64" -Wl,"-arch i386 -arch x86_64" mod_upload_progress.c
+
+  Missing compiler directory:
+
+    If you get this error:
+      /Applications/Xcode.app/Contents/Developer/Toolchains/OSX10.11.xctoolchain/usr/bin/cc: No such file or directory
+    create a symlink before compiling:
+      sudo ln -s /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain /Applications/Xcode.app/Contents/Developer/Toolchains/OSX10.11.xctoolchain
+
+  OS X 10.11 El Capitan with System Integrity Protection (SIP):
+    
+    You will get this error when installing:
+      install: /usr/libexec/apache2/mod_upload_progress.so: Operation not permitted
+    You can work around that by creating a custom directory and copy the file over after compiling:
+      mkdir /usr/local/libexec/apache2
+      cp .libs/mod_upload_progress.so /usr/local/libexec/apache2/mod_upload_progress.so
+    You can then manually reference this location in your httpd.conf file:
+      LoadModule upload_progress_module /usr/local/libexec/apache2/mod_upload_progress.so
 
 Global config:
   you can define maximum size for shared memory (default is 50kB):
