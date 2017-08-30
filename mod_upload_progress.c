@@ -333,7 +333,7 @@ static int track_upload_progress(ap_filter_t *f, apr_bucket_brigade *bb,
         apr_off_t length;
         apr_brigade_length(bb, 1, &length);
         node->received += length;
-        if (node->received > node->length) /* handle chunked tranfer */
+        if (node->received > node->length) /* handle chunked transfer */
             node->length = node->received;
         int upload_time = t - node->started_at;
         if (upload_time > 0) {
