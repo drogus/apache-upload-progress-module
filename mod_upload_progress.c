@@ -533,6 +533,7 @@ static apr_status_t upload_progress_cache_init(apr_pool_t *pool, ServerConfig *c
     if (config->cache_file) {
         /* Remove any existing shm segment with this name. */
         apr_shm_remove(config->cache_file, pool);
+        unlink(config->cache_file);
     }
 
     size = APR_ALIGN_DEFAULT(config->cache_bytes);
